@@ -1,6 +1,7 @@
 """
 Moment labels for eval and future training data.
-Stored per video content hash (not job id) so they outlive the job and its expiry.
+Stored per video content hash (not job id) so they outlive the job and its expiry. Each file is
+{"filename", "duration", "labels"}; older files were a bare list of labels.
 """
 
 import csv
@@ -23,6 +24,7 @@ QUALITIES = ("good", "needs work", "none")
 OTHER = "other"
 MAX_NOTE_CHARS = 500
 CSV_FIELDS = ("id", "t", "label", "quality", "note", "created_at")
+ALL_CSV_FIELDS = ("hash", "filename") + CSV_FIELDS
 
 _lock = threading.Lock()
 
@@ -61,21 +63,49 @@ def _file(digest: str) -> str:
     return os.path.join(settings.LABELS_DIR, f"{digest}.json")
 
 
-def list_labels(digest: str) -> list[dict]:
+def load(digest: str) -> dict:
+    """The video's label file as {"filename", "duration", "labels"} (labels sorted by time)."""
     try:
         with open(_file(digest), encoding="utf-8") as f:
-            labels = json.load(f)
+            data = json.load(f)
     except FileNotFoundError:
-        return []
-    return sorted(labels, key=lambda l: (l["t"], l["created_at"]))
+        data = {}
+    if isinstance(data, list):  # the original format
+        data = {"labels": data}
+    labels = sorted(data.get("labels", []), key=lambda l: (l["t"], l["created_at"]))
+    return {"filename": data.get("filename"), "duration": data.get("duration"), "labels": labels}
 
 
-def _write(digest: str, labels: list[dict]) -> None:
+def list_labels(digest: str) -> list[dict]:
+    return load(digest)["labels"]
+
+
+def list_all() -> list[dict]:
+    """Every labeled video, whether or not its job still exists: [{"hash", "filename", "duration", "labels"}]."""
+    entries = []
+    try:
+        names = sorted(os.listdir(settings.LABELS_DIR))
+    except FileNotFoundError:
+        return entries
+    for name in names:
+        digest, ext = os.path.splitext(name)
+        if ext != ".json":
+            continue
+        try:
+            data = load(digest)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue  # not one of our files
+        if data["labels"]:
+            entries.append({"hash": digest, **data})
+    return entries
+
+
+def _write(digest: str, data: dict) -> None:
     os.makedirs(settings.LABELS_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=settings.LABELS_DIR, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(labels, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, indent=2, ensure_ascii=False)
         os.replace(tmp, _file(digest))
     except BaseException:
         if os.path.exists(tmp):
@@ -83,7 +113,7 @@ def _write(digest: str, labels: list[dict]) -> None:
         raise
 
 
-def add_label(digest: str, duration: float, t: float, label: str, quality: str, note: str) -> dict:
+def add_label(digest: str, duration: float, t: float, label: str, quality: str, note: str, filename: str = "") -> dict:
     if not math.isfinite(t) or not 0 <= t <= duration:
         raise LabelError(f"Time must be between 0 and {duration:.2f} seconds.")
     if label not in label_options():
@@ -102,19 +132,21 @@ def add_label(digest: str, duration: float, t: float, label: str, quality: str, 
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     with _lock:
-        labels = list_labels(digest)
-        labels.append(entry)
-        _write(digest, labels)
+        data = load(digest)
+        data["labels"].append(entry)
+        data["filename"] = data["filename"] or filename or None  # the first name this video was labeled under stays
+        data["duration"] = round(duration, 3)
+        _write(digest, data)
     return entry
 
 
 def delete_label(digest: str, label_id: str) -> bool:
     with _lock:
-        labels = list_labels(digest)
-        kept = [l for l in labels if l["id"] != label_id]
-        if len(kept) == len(labels):
+        data = load(digest)
+        kept = [l for l in data["labels"] if l["id"] != label_id]
+        if len(kept) == len(data["labels"]):
             return False
-        _write(digest, kept)
+        _write(digest, {**data, "labels": kept})
     return True
 
 
@@ -129,4 +161,15 @@ def to_csv(labels: list[dict]) -> str:
     writer.writeheader()
     for l in labels:
         writer.writerow({**l, "note": _csv_safe(l["note"])})
+    return out.getvalue()
+
+
+def all_to_csv(entries: list[dict]) -> str:
+    """One row per label across videos: hash and original filename first, then the label fields."""
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=ALL_CSV_FIELDS)
+    writer.writeheader()
+    for entry in entries:
+        for l in entry["labels"]:
+            writer.writerow({**l, "hash": entry["hash"], "filename": _csv_safe(entry["filename"] or ""), "note": _csv_safe(l["note"])})
     return out.getvalue()

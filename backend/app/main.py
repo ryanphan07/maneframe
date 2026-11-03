@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import uuid
+from typing import NamedTuple
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,7 @@ from app.services import labels as label_service
 from app.services import llm as llm_service
 from app.services.jobs import TERMINAL, JobNotFoundError, job_store
 from app.services.pipeline import cleanup_job_files, purge_expired_jobs, run_pipeline, sweep_uploads
-from app.services.video_processor import validate_upload_metadata, sanitize_filename, get_video_duration
+from app.services.video_processor import validate_upload_metadata, sanitize_filename
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -180,6 +181,10 @@ async def export_job(job_id: str, captions: bool = True):
     return FileResponse(path, media_type="video/mp4", filename=f"maneframe_{os.path.splitext(original)[0]}.mp4")
 
 
+def _csv_response(text: str) -> Response:
+    return Response(text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="maneframe_labels.csv"'})
+
+
 class LabelIn(BaseModel):
     t: float
     label: str
@@ -187,25 +192,32 @@ class LabelIn(BaseModel):
     note: str = ""
 
 
-async def _label_context(job_id: str) -> tuple[str, float]:
-    """Content hash and duration of the job's kept video."""
+class LabelContext(NamedTuple):
+    digest: str
+    duration: float
+    filename: str
+
+
+async def _label_context(job_id: str) -> LabelContext:
+    """Content hash, duration (measured once when the video was prepared) and name of the job's kept video."""
     try:
         job = job_store.get(job_id)
     except JobNotFoundError:
         raise HTTPException(status_code=404, detail="Job not found")
+    if job.duration is None:
+        raise HTTPException(status_code=409, detail="The video is still being prepared.")
     if not os.path.exists(job.video_path):
         raise HTTPException(status_code=404, detail="The video is no longer available.")
     try:
         digest = await asyncio.to_thread(label_service.video_hash, job.video_path)
-        duration = await asyncio.to_thread(get_video_duration, job.video_path)
-    except (OSError, ValueError):
+    except OSError:
         raise HTTPException(status_code=404, detail="The video is no longer available.")
-    return digest, duration
+    return LabelContext(digest, job.duration, os.path.basename(job.video_path).removeprefix(f"{job_id}_"))
 
 
 @app.get("/api/jobs/{job_id}/labels")
 async def list_job_labels(job_id: str):
-    digest, _ = await _label_context(job_id)
+    digest = (await _label_context(job_id)).digest
     return {
         "labels": label_service.list_labels(digest),
         "label_options": label_service.label_options(),
@@ -215,10 +227,10 @@ async def list_job_labels(job_id: str):
 
 @app.post("/api/jobs/{job_id}/labels", status_code=201)
 async def add_job_label(job_id: str, body: LabelIn):
-    digest, duration = await _label_context(job_id)
+    ctx = await _label_context(job_id)
     try:
         return await asyncio.to_thread(
-            label_service.add_label, digest, duration, body.t, body.label, body.quality, body.note
+            label_service.add_label, ctx.digest, ctx.duration, body.t, body.label, body.quality, body.note, ctx.filename
         )
     except label_service.LabelError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -226,7 +238,7 @@ async def add_job_label(job_id: str, body: LabelIn):
 
 @app.delete("/api/jobs/{job_id}/labels/{label_id}", status_code=204)
 async def delete_job_label(job_id: str, label_id: str):
-    digest, _ = await _label_context(job_id)
+    digest = (await _label_context(job_id)).digest
     if not await asyncio.to_thread(label_service.delete_label, digest, label_id):
         raise HTTPException(status_code=404, detail="Label not found")
     return Response(status_code=204)
@@ -234,12 +246,15 @@ async def delete_job_label(job_id: str, label_id: str):
 
 @app.get("/api/jobs/{job_id}/labels.csv")
 async def labels_csv(job_id: str):
-    digest, _ = await _label_context(job_id)
-    return Response(
-        label_service.to_csv(label_service.list_labels(digest)),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="maneframe_labels.csv"'},
-    )
+    digest = (await _label_context(job_id)).digest
+    return _csv_response(label_service.to_csv(label_service.list_labels(digest)))
+
+
+@app.get("/api/labels.csv")
+async def all_labels_csv():
+    """Every labeled video (hash, original filename, label fields); needs no live job."""
+    entries = await asyncio.to_thread(label_service.list_all)
+    return _csv_response(label_service.all_to_csv(entries))
 
 
 @app.websocket("/ws/analyze/{job_id}")
