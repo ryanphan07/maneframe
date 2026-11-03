@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.services.export import ExportError, render_export
+from app.services.transcode import normalize_video
 from app.services import llm as llm_service
 from app.services.jobs import TERMINAL, JobNotFoundError, job_store
 from app.services.pipeline import cleanup_job_files, purge_expired_jobs, run_pipeline, sweep_uploads
@@ -101,6 +102,10 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
                 shutil.copyfileobj(file.file, buffer)
 
         await asyncio.to_thread(_save)
+        try:
+            await normalize_video(video_path, not await asyncio.to_thread(is_video_corrupt, video_path))
+        except ExportError:
+            raise HTTPException(status_code=400, detail="The uploaded video could not be converted to a readable format.")
         if await asyncio.to_thread(is_video_corrupt, video_path):
             raise HTTPException(status_code=400, detail="The uploaded video file is corrupt.")
         try:
