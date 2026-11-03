@@ -21,6 +21,7 @@ DUCK_MERGE_GAP_SEC = 0.5  # quips closer than this share one ducked stretch inst
 NO_AUDIO_CAPTION_SEC = 3.0
 CRF = 23
 CAPTIONS_FILE = "captions.ass"
+GRAPH_FILE = "filter_graph.txt"
 STDERR_TAIL = 2000
 
 
@@ -134,22 +135,15 @@ def _num(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
-def build_ffmpeg_args(
-    ffmpeg: str,
-    video_path: str,
-    output_name: str,
+def build_filter_graph(
     duration: float,
     has_audio: bool,
     quips: List[ExportQuip],
     captions_file: Optional[str] = None,
-) -> List[str]:
-    """The ffmpeg command line. `captions_file` and `output_name` are relative: ffmpeg runs with the job's export folder
-    as its working directory, which keeps drive letters out of the subtitles filter's escaping rules."""
+) -> str:
+    """The -filter_complex graph. `captions_file` is relative: ffmpeg runs with the job's export folder as its working
+    directory, which keeps drive letters out of the subtitles filter's escaping rules."""
     spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
-    args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", video_path]
-    for quip in spoken:
-        args += ["-i", quip.audio_path]
-
     # even dimensions are required by yuv420p H.264; this changes nothing for even-sized video
     video_filters = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
     if captions_file:
@@ -172,7 +166,25 @@ def build_ffmpeg_args(
             f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0:dropout_transition=0,"
             f"alimiter=limit=0.95[aout]"
         )
-    args += ["-filter_complex", ";".join(graph), "-map", "[vout]"]
+    return ";\n".join(graph)
+
+
+def build_ffmpeg_args(
+    ffmpeg: str,
+    video_path: str,
+    output_name: str,
+    duration: float,
+    has_audio: bool,
+    quips: List[ExportQuip],
+    graph_file: str = GRAPH_FILE,
+) -> List[str]:
+    """The ffmpeg command line. The filter graph is read from `graph_file` (see build_filter_graph) because a long graph
+    would exceed the Windows command-line limit; `graph_file` and `output_name` are relative to ffmpeg's working directory."""
+    spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
+    args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", video_path]
+    for quip in spoken:
+        args += ["-i", quip.audio_path]
+    args += ["-filter_complex_script", graph_file, "-map", "[vout]"]
     if spoken:
         args += ["-map", "[aout]"]
     elif has_audio:
@@ -249,6 +261,21 @@ def export_quips(job_id: str, quips: List[Dict[str, Any]]) -> List[ExportQuip]:
     return result
 
 
+def _relative_audio(quips: List[ExportQuip], folder: str) -> List[ExportQuip]:
+    """Quip audio paths relative to ffmpeg's working directory: hundreds of absolute -i paths would overflow the
+    Windows command line. A path on another drive stays absolute."""
+    result = []
+    for quip in quips:
+        path = quip.audio_path
+        if path:
+            try:
+                path = os.path.relpath(path, folder)
+            except ValueError:
+                pass
+        result.append(ExportQuip(quip.timestamp, quip.text, path, quip.duration_sec))
+    return result
+
+
 _locks: Dict[Tuple[str, bool], asyncio.Lock] = {}
 
 
@@ -274,7 +301,9 @@ async def render_export(job_id: str, video_path: str, quips: List[Dict[str, Any]
                 captions_file = CAPTIONS_FILE
                 with open(os.path.join(folder, captions_file), "w", encoding="utf-8") as f:
                     f.write(build_ass(items, width, height))
-            args = build_ffmpeg_args(ffmpeg, video_path, partial, duration, has_audio, items, captions_file)
+            with open(os.path.join(folder, GRAPH_FILE), "w", encoding="utf-8") as f:
+                f.write(build_filter_graph(duration, has_audio, items, captions_file))
+            args = build_ffmpeg_args(ffmpeg, video_path, partial, duration, has_audio, _relative_audio(items, folder))
             try:
                 code, stderr = await _run(args, folder, settings.EXPORT_TIMEOUT_SECONDS)
             except (asyncio.TimeoutError, subprocess.TimeoutExpired):

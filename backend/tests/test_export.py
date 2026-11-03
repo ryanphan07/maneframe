@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 import cv2
@@ -10,7 +11,9 @@ from app.config import settings
 from app.main import app
 from app.schemas.events import CommentaryQuip, CommentaryResponse
 from app.services import export as export_module
-from app.services.export import ExportError, ExportQuip, build_ass, build_ffmpeg_args, caption_spans, duck_intervals
+from app.services.export import (
+    ExportError, ExportQuip, build_ass, build_ffmpeg_args, build_filter_graph, caption_spans, duck_intervals,
+)
 from app.services.jobs import job_store
 
 FFMPEG = "ffmpeg"
@@ -50,41 +53,43 @@ def test_duck_intervals_cover_spoken_quips_only_and_merge_close_ones():
     assert duck_intervals(quips) == [(10.0, 13.3), (30.0, 32.0)]
 
 
-def args_for(quips, has_audio=True, captions="captions.ass"):
-    return build_ffmpeg_args(FFMPEG, "C:/up/v.mp4", "out.partial.mp4", 60.0, has_audio, quips, captions)
+def args_for(quips, has_audio=True):
+    return build_ffmpeg_args(FFMPEG, "C:/up/v.mp4", "out.partial.mp4", 60.0, has_audio, quips)
 
 
-def graph_of(args):
-    return args[args.index("-filter_complex") + 1]
+def graph_of(quips, has_audio=True, captions="captions.ass"):
+    return build_filter_graph(60.0, has_audio, quips, captions)
 
 
 def test_args_mix_delayed_quips_over_ducked_original_audio():
-    args = args_for([spoken(1.5, 2.0, "a"), spoken(10.0, 2.0, "b")])
-    graph = graph_of(args)
+    quips = [spoken(1.5, 2.0, "a"), spoken(10.0, 2.0, "b")]
+    args = args_for(quips)
+    graph = graph_of(quips)
     assert [args[i + 1] for i, a in enumerate(args) if a == "-i"] == ["C:/up/v.mp4", "/audio/a.mp3", "/audio/b.mp3"]
     assert "[0:a]volume=-10dB:enable='between(t,1.5,3.5)+between(t,10,12)'[base]" in graph
     assert "[1:a]adelay=1500:all=1[q1]" in graph and "[2:a]adelay=10000:all=1[q2]" in graph
     assert "[base][q1][q2]amix=inputs=3:duration=first:normalize=0" in graph
+    assert args[args.index("-filter_complex_script") + 1] == "filter_graph.txt" and "-filter_complex" not in args
     assert args[args.index("-map") + 1] == "[vout]" and "[aout]" in args
     assert args[args.index("-crf") + 1] == "23"
     assert "libx264" in args and "aac" in args and args[-1] == "out.partial.mp4"
 
 
 def test_captions_use_a_relative_subtitle_filename():
-    graph = graph_of(args_for([spoken(1.0, 2.0)]))
+    graph = graph_of([spoken(1.0, 2.0)])
     assert "subtitles=captions.ass" in graph
     assert ":" not in graph.split("subtitles=")[1].split("[")[0]  # no drive letter or path to escape
-    assert "subtitles" not in graph_of(args_for([spoken(1.0, 2.0)], captions=None))
+    assert "subtitles" not in graph_of([spoken(1.0, 2.0)], captions=None)
 
 
 def test_source_without_audio_gets_a_silent_base_and_no_ducking():
-    graph = graph_of(args_for([spoken(1.0, 2.0)], has_audio=False))
+    graph = graph_of([spoken(1.0, 2.0)], has_audio=False)
     assert "anullsrc" in graph and "volume=" not in graph and "[0:a]" not in graph
 
 
 def test_no_spoken_quips_keeps_the_original_audio_untouched():
     args = args_for([silent(1.0)])
-    assert "amix" not in graph_of(args)
+    assert "amix" not in graph_of([silent(1.0)])
     assert args[args.index("0:a:0") - 1] == "-map"
 
 
@@ -95,7 +100,7 @@ def test_no_spoken_quips_and_no_source_audio_means_no_audio_stream():
 
 def test_output_dimensions_are_kept_even_and_duration_capped():
     args = args_for([spoken(1.0, 2.0)])
-    assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in graph_of(args)
+    assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in graph_of([spoken(1.0, 2.0)])
     assert args[args.index("-t") + 1] == "60"
 
 
@@ -149,6 +154,32 @@ def test_export_returns_the_rendered_file_named_after_the_original(client, uploa
     assert resp.headers["content-type"] == "video/mp4"
     assert "maneframe_Lion_dance_1.mp4" in resp.headers["content-disposition"]
     assert seen["captions"] is False and seen["quips"][0]["text"] == "hi"
+
+
+def test_post_export_renders_and_returns_the_download_url(client, upload_dir, monkeypatch):
+    job_id = completed_job(upload_dir)
+    seen = []
+
+    async def fake_render(jid, video_path, quips, captions):
+        seen.append(captions)
+        return str(upload_dir / "out.mp4")
+
+    monkeypatch.setattr(main_module, "render_export", fake_render)
+    resp = client.post(f"/api/jobs/{job_id}/export?captions=0")
+    assert resp.status_code == 200 and resp.json() == {"url": f"/api/jobs/{job_id}/export.mp4?captions=0"}
+    assert seen == [False]
+    assert client.post("/api/jobs/nope/export").status_code == 404
+
+
+def test_post_export_failure_is_a_json_error(client, upload_dir, monkeypatch):
+    job_id = completed_job(upload_dir)
+
+    async def failing(*a, **k):
+        raise ExportError("Rendering the video failed.")
+
+    monkeypatch.setattr(main_module, "render_export", failing)
+    resp = client.post(f"/api/jobs/{job_id}/export")
+    assert resp.status_code == 500 and resp.json() == {"detail": "Rendering the video failed."}
 
 
 def test_export_failure_is_a_clear_error_never_a_file(client, upload_dir, monkeypatch):
@@ -232,3 +263,43 @@ async def test_real_render_has_h264_aac_original_size_and_burned_captions(upload
     assert abs(bottom_strip(out, 1.5) - bottom_strip(plain, 1.5)).mean() > 5
 
     assert await export_module.render_export(job_id, str(video), quips, captions=True) == out  # cached
+
+
+@pytest.mark.skipif(not export_module.ffmpeg_available(), reason="no ffmpeg binary available")
+@pytest.mark.anyio
+async def test_real_render_with_300_quips_stays_under_the_command_line_limit(upload_dir):
+    ffmpeg = export_module.resolve_ffmpeg()
+    job_id = "c" * 32
+    video = upload_dir / "videos" / f"{job_id}_many.mp4"
+    video.parent.mkdir()
+    audio_dir = upload_dir / "audio" / job_id
+    audio_dir.mkdir(parents=True)
+
+    def run(*a):
+        subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *a], check=True)
+
+    run("-f", "lavfi", "-i", "testsrc2=size=160x120:rate=5:duration=65", "-f", "lavfi", "-i", "sine=frequency=220:duration=65",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video))
+    run("-f", "lavfi", "-i", "sine=frequency=880:duration=0.2", str(audio_dir / "seed.mp3"))
+    quips = []
+    for i in range(300):
+        name = f"audio_{i * 0.2:.2f}_{i:04d}.mp3"
+        shutil.copy(audio_dir / "seed.mp3", audio_dir / name)
+        quips.append({"timestamp": i * 0.2, "text": f"quip {i}", "audio_url": f"http://h/uploads/audio/x/{name}", "duration_sec": 0.2})
+
+    seen = {}
+    real_args = export_module.build_ffmpeg_args
+
+    def spy(*a, **k):
+        seen["args"] = real_args(*a, **k)
+        return seen["args"]
+
+    export_module.build_ffmpeg_args = spy
+    try:
+        out = await export_module.render_export(job_id, str(video), quips, captions=True)
+    finally:
+        export_module.build_ffmpeg_args = real_args
+    assert os.path.getsize(out) > 0
+    assert sum(len(a) + 1 for a in seen["args"]) < 32000  # the Windows CreateProcess limit is 32767
+    assert len(seen["args"]) > 600  # one -i per quip, none of the graph
+    assert (upload_dir / "exports" / job_id / "filter_graph.txt").read_text().count("adelay") == 300

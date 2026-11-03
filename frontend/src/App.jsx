@@ -33,21 +33,6 @@ const errorDetail = (error, fallback) => {
   return typeof detail === 'string' && detail ? detail : fallback;
 };
 
-// A blob response body holds the server's JSON error when the request failed.
-const exportErrorMessage = async (error) => {
-  const body = error?.response?.data;
-  if (body instanceof Blob) {
-    try {
-      const detail = JSON.parse(await body.text()).detail;
-      if (typeof detail === 'string' && detail) return detail;
-    } catch {
-      // not JSON: fall through to the generic message
-    }
-    return 'Failed to render the video.';
-  }
-  return errorDetail(error, 'Failed to render the video.');
-};
-
 const exportFileName = (originalName) => `maneframe_${originalName.replace(/\.[^.]*$/, '')}.mp4`;
 
 function App() {
@@ -251,20 +236,18 @@ function App() {
     if (!exportJob || rendering) return;
     setRendering(true);
     try {
-      const { data } = await axios.get(`${API_BASE}/api/jobs/${exportJob.jobId}/export.mp4`, {
+      // render on the server first (errors come back as JSON), then let the browser stream the file from its URL
+      const { data } = await axios.post(`${API_BASE}/api/jobs/${exportJob.jobId}/export`, null, {
         params: { captions: captions ? 1 : 0 },
-        responseType: 'blob',
       });
-      const url = URL.createObjectURL(data);
       const link = document.createElement('a');
-      link.href = url;
+      link.href = new URL(data.url, API_BASE).href;
       link.download = exportJob.fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
-      toast.error(await exportErrorMessage(error), { position: 'top-right' });
+      toast.error(errorDetail(error, 'Failed to render the video.'), { position: 'top-right' });
     } finally {
       setRendering(false);
     }

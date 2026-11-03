@@ -143,9 +143,7 @@ async def get_job(job_id: str):
     }
 
 
-@app.get("/api/jobs/{job_id}/export.mp4")
-async def export_job(job_id: str, captions: bool = True):
-    """Render the finished job as an mp4 (original audio ducked under the commentary, optional burned-in captions)."""
+async def _rendered_export(job_id: str, captions: bool) -> str:
     try:
         job = job_store.get(job_id)
     except JobNotFoundError:
@@ -154,9 +152,23 @@ async def export_job(job_id: str, captions: bool = True):
         raise HTTPException(status_code=409, detail="The commentary is not ready yet.")
     quips = [q.model_dump() for q in job.result.quips]
     try:
-        path = await render_export(job_id, job.video_path, quips, captions)
+        return await render_export(job_id, job.video_path, quips, captions)
     except ExportError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
+
+
+@app.post("/api/jobs/{job_id}/export")
+async def start_export(job_id: str, captions: bool = True):
+    """Render the finished job's mp4 now (cached for the download) and return its download URL."""
+    await _rendered_export(job_id, captions)
+    return {"url": f"/api/jobs/{job_id}/export.mp4?captions={int(captions)}"}
+
+
+@app.get("/api/jobs/{job_id}/export.mp4")
+async def export_job(job_id: str, captions: bool = True):
+    """The rendered mp4 (original audio ducked under the commentary, optional burned-in captions); renders it if needed."""
+    path = await _rendered_export(job_id, captions)
+    job = job_store.get(job_id)
     original = os.path.basename(job.video_path).removeprefix(f"{job_id}_")
     return FileResponse(path, media_type="video/mp4", filename=f"maneframe_{os.path.splitext(original)[0]}.mp4")
 
