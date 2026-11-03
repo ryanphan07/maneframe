@@ -10,14 +10,14 @@ Goal: a better product for real users: lion dance teams turning performance clip
 - LLM: llama-server (OpenAI-compatible) at `http://127.0.0.1:8080/v1`, multimodal via `--mmproj`. Configure via `backend/.env` (see `backend/.env.example` for LLM_*, WINDOW_SECONDS, FRAMES_PER_WINDOW, FRAME_WIDTH, MAX_QUIPS_PER_WINDOW, MAX_VIDEO_SECONDS).
 - Model in use on 2026-10-28: Qwen3.5-9B Q4_K_M (the larger Qwen3.6-35B-A3B is the intended model for real runs). Measured (docs/BENCHMARKS.md): about 54 s per LLM call, 299 s for a 40 s clip.
 - Start it with: `llama-server -m <gguf> --mmproj <mmproj-F16.gguf> -c 32768 -np 1 -ngl 99 --port 8080 --jinja`
-- The system prompt lives in `backend/app/prompts/commentary_system.txt` (`MAX_QUIPS` is replaced by MAX_QUIPS_PER_WINDOW at load). The LLM step never falls back to canned text: a window that fails after one retry is skipped and reported (DECISIONS D4); a job where every window fails ends in `error`.
+- The system prompt is built by `llm.load_system_prompt(style)` from `backend/app/prompts/commentary_system.txt` (`MAX_QUIPS` is replaced by MAX_QUIPS_PER_WINDOW at load), `lion_dance_glossary.txt` (a leading `DRAFT` line is dropped), `examples.txt` (only if it has non-`#` lines) and `styles/<style>.txt`; the files are read once per process and checked at startup. Each window's user message carries the last 2 windows' `seen` summaries and recent quips as earlier context. `scripts/eval_commentary.py` compares prompts and styles (eval/clips.txt and eval/results/ are git-ignored). The LLM step never falls back to canned text: a window that fails after one retry is skipped and reported (DECISIONS D4); a job where every window fails ends in `error`.
 - TTS: edge-tts (needs internet). Failures yield no audio (`audio_url` null), never placeholder files. Settings: TTS_VOICE, TTS_RATE, TTS_TIMEOUT_SECONDS, TTS_CONCURRENCY (1), TTS_START_STAGGER_SECONDS (0.3), TTS_RETRIES, TTS_RETRY_DELAY_SECONDS, MAX_SHIFT_SEC. Retried once: timeouts, connection errors, 5xx, edge-tts NoAudioReceived/WebSocketError; never 401/403. `backend/scripts/tts_check.py` smoke-tests the TTS path.
 - mp4 export uses ffmpeg: `FFMPEG_PATH` if set, else the binary bundled with `imageio-ffmpeg` (requirements.txt). Exports are rendered on demand into `uploads/exports/<job id>/`; the ffmpeg command is built by pure functions in `services/export.py`. The subtitles filter gets a relative file name and ffmpeg runs with that folder as cwd (no Windows path escaping).
 - All settings come from the single shared `settings` object in `backend/app/config.py`. No hardcoded URLs or paths elsewhere.
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (164) verified 2026-10-29; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (182) verified 2026-10-29; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
@@ -33,7 +33,7 @@ Run from the repo root in PowerShell unless noted. Tests (164) verified 2026-10-
 - No pasted chat text, citation markers, or meta commentary in docs.
 
 ## API & WebSocket Contract
-- `POST /api/upload` returns JSON including `job_id`. The job runs in the background.
+- `POST /api/upload` (multipart `file`, optional form field `style`: `hype` default, `deadpan`, `broadcast`; the allowed values are the files in `prompts/styles/`, anything else is a 400) returns JSON including `job_id`. The job runs in the background. The style is stored on the job and returned as `result.style`.
 - `WS /ws/analyze/{job_id}` is server-to-client only. Every message is:
   ```json
   {

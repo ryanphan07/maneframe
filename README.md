@@ -55,8 +55,8 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 
 | Route | Purpose |
 |---|---|
-| `POST /api/upload` (multipart `file`) | Validates and saves the clip, starts a job. Returns `{job_id, filename}`. 400 `{"detail": ...}` on bad input |
-| `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available}` once completed. 404 if unknown |
+| `POST /api/upload` (multipart `file`, optional form field `style`) | Validates and saves the clip, starts a job. `style` is one of `hype` (default), `deadpan`, `broadcast`; anything else is a 400. Returns `{job_id, filename}`. 400 `{"detail": ...}` on bad input |
+| `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available, style, ...}` once completed. 404 if unknown |
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
 | `GET /api/jobs/{job_id}/export.mp4?captions=1` | Renders the finished job with ffmpeg and returns an mp4: original audio ducked about 10 dB while a quip plays, quips mixed in at their timestamps, quip text burned in at the bottom when `captions` is 1 (default). Cached per job and captions flag. 409 until completed, 404 if the source video or audio is gone, 500 `{"detail": ...}` if ffmpeg fails |
 | `GET /uploads/audio/{job_id}/{file}.mp3` | Generated speech clips. Raw videos are never served |
@@ -75,7 +75,9 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `JOB_TTL_SECONDS`, `JOB_STALE_SECONDS`, `CLEANUP_INTERVAL_SECONDS` | 3600, 1800, 600 | Job expiry; stale-running-job timeout; cleanup interval |
 | `CORS_ORIGINS`, `PUBLIC_BASE_URL`, `LOG_LEVEL` | localhost:5173/3000, http://localhost:8000, INFO | Server |
 
-The system prompt is `backend/app/prompts/commentary_system.txt` (restart the backend after editing).
+The system prompt is `backend/app/prompts/commentary_system.txt` plus `lion_dance_glossary.txt` (marked DRAFT until reviewed), an optional `examples.txt` (added only when it has real examples) and the chosen style from `prompts/styles/*.txt`. Restart the backend after editing. Each window also gets the last two windows' summaries and recent quips as earlier context.
+
+To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python scripts/eval_commentary.py --styles hype,deadpan` from `backend/` (LLM step only; needs llama-server), rate the rows in `eval/results/<timestamp>.csv`, then `python scripts/eval_commentary.py --summarize` prints the mean rating per prompt hash and style.
 
 ## Tests
 

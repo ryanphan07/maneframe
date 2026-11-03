@@ -16,7 +16,7 @@ The goal is a better product for real users: lion dance teams turning performanc
 
 ## Phase 1: shareable output and commentary quality
 - mp4 export (done, session 21): the video with the commentary audio mixed in and optional burned-in captions; `GET /api/jobs/{id}/export.mp4`. Follow-ups: try it on a real clip, progress for long renders, output size options.
-- Commentary quality: lion dance domain vocabulary in the prompt, few-shot examples, `seen` continuity across windows, a style option, and a small eval set to compare prompts and models.
+- Commentary quality (groundwork done, session 22): glossary (DRAFT, needs owner review), `seen` continuity across windows, styles (hype, deadpan, broadcast) and `scripts/eval_commentary.py`. Still to do: fill `examples.txt` with real few-shot examples, run the eval on a live model and compare prompts, models and styles, tune the style texts from the ratings.
 
 ## Phase 2: speed and robustness
 - 9B vs 35B-A3B throughput table (`FRAME_WIDTH` 640, `FRAMES_PER_WINDOW` 4, `WINDOW_SECONDS` 20, optionally `llama-server -np 2`).
