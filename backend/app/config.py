@@ -37,11 +37,12 @@ class Settings(BaseSettings):
 
     FFMPEG_PATH: str = ""  # empty: use the ffmpeg binary bundled with imageio-ffmpeg
     EXPORT_TIMEOUT_SECONDS: float = 1800.0  # max time for one mp4 render
+    TRANSCODE_TIMEOUT_SECONDS: float = 3600.0  # hard cap on converting an upload; progress keeps the job from going stale, see JOB_STALE_SECONDS
 
     LOG_LEVEL: str = "INFO"
 
     JOB_TTL_SECONDS: int = 3600
-    JOB_STALE_SECONDS: int = 1800  # a running job with no progress update for this long is failed so uploads unblock
+    JOB_STALE_SECONDS: int = 1800  # a running job with no progress update for this long is failed so uploads unblock; a conversion reports progress while ffmpeg advances, so only a hung one goes stale
     CLEANUP_INTERVAL_SECONDS: int = 600
     MAX_VIDEO_SECONDS: float = 1800.0  # guard against accidents; long clips are a goal (docs/DECISIONS.md D1)
     MAX_UPLOAD_MB: int = 2048

@@ -12,7 +12,7 @@ from app.services.commentary import process_video_commentary
 from app.services.llm import DEFAULT_STYLE, LLMOutputError
 from app.services.jobs import job_store
 from app.services.transcode import normalize_video
-from app.services.video_processor import get_video_duration, is_video_corrupt
+from app.services.video_processor import UnusableVideo, get_video_duration, is_video_corrupt
 
 logger = logging.getLogger("maneframe.pipeline")
 
@@ -39,7 +39,7 @@ def friendly_error(exc: BaseException) -> str:
         return "The AI model is not reachable or timed out. Is llama-server running?"
     if isinstance(exc, LLMOutputError):
         return "The AI model returned unusable output. Try again."
-    if isinstance(exc, VideoRejected):
+    if isinstance(exc, (VideoRejected, UnusableVideo)):
         return str(exc)
     if isinstance(exc, ValueError):
         return "The video could not be processed."
@@ -106,9 +106,17 @@ async def prepare_video(video_path: str, progress_cb) -> PreparedVideo:
     """First job step: make the upload readable (upright H.264 when needed), then check it.
     Raises VideoRejected for a corrupt, unconvertible or too long video."""
     await progress_cb("extracting", 2, "Converting video")
+
+    async def conversion_progress(percent: Optional[int]) -> None:
+        # Every report refreshes the job's last-activity time, so a running conversion is never "stale".
+        if percent is None:
+            await progress_cb("extracting", 2, "Converting video")
+        else:
+            await progress_cb("extracting", 2 + percent * 7 // 100, f"Converting video {percent}%")
+
     try:
         readable = not await asyncio.to_thread(is_video_corrupt, video_path)
-        converted = await normalize_video(video_path, readable)
+        converted = await normalize_video(video_path, readable, conversion_progress)
     except ExportError:
         raise VideoRejected("The uploaded video could not be converted to a readable format.")
     if await asyncio.to_thread(is_video_corrupt, video_path):

@@ -1,3 +1,5 @@
+import asyncio
+import os
 import subprocess
 
 import cv2
@@ -145,3 +147,89 @@ def test_job_stores_a_rotated_phone_clip_upright(tmp_path, monkeypatch):
         assert served.headers["content-type"] == "video/mp4" and "Video: h264" in probe(next((tmp_path / "videos").iterdir()))
     stored = next((tmp_path / "videos").iterdir())
     assert "rotation of" not in probe(stored) and frame_shape(str(stored)) == (W, H)
+
+
+def test_parse_duration_and_progress_seconds():
+    assert transcode.parse_duration("  Duration: 00:01:02.50, start: 0.0, bitrate: 1 kb/s") == pytest.approx(62.5)
+    assert transcode.parse_duration("no duration here") is None
+    assert transcode.parse_progress_seconds("frame=1\nout_time_us=1500000\nprogress=continue\nout_time_us=2500000\n") == pytest.approx(2.5)
+    assert transcode.parse_progress_seconds("out_time_us=N/A\nframe=0\n") is None
+
+
+def _fake_run_writing_progress(real_run, seconds_done):
+    async def fake(args, cwd, timeout):
+        if "libx264" not in args:
+            return await real_run(args, cwd, timeout)
+        path = os.path.join(cwd, args[args.index("-progress") + 1])
+        with open(path, "w") as fh:
+            fh.write(f"out_time_us={int(seconds_done * 1e6)}\nprogress=continue\n")
+        await asyncio.sleep(0.3)
+        return await real_run(args, cwd, timeout)
+    return fake
+
+
+@pytest.mark.anyio
+async def test_transcode_reports_percent_while_ffmpeg_runs(tmp_path, monkeypatch):
+    clip = make_clip(tmp_path / "x.mp4", rotation=90)  # a 4 s clip
+    monkeypatch.setattr(transcode, "PROGRESS_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(export_module, "_run", _fake_run_writing_progress(export_module._run, 2.0))
+    seen = []
+
+    async def on_progress(percent):
+        seen.append(percent)
+
+    assert await transcode.normalize_video(clip, True, on_progress) is True
+    assert seen[0] == 50 and seen == sorted(seen) and seen[-1] <= 99  # the real ffmpeg then rewrites the file
+    assert not list(tmp_path.glob("*.transcode.*"))
+
+
+@pytest.mark.anyio
+async def test_transcode_timeout_is_a_clear_error_and_leaves_nothing_behind(tmp_path, monkeypatch):
+    from app.config import settings
+    clip = make_clip(tmp_path / "x.mp4", rotation=90)
+    real_run = export_module._run
+    seen_timeouts = []
+
+    async def timing_out(args, cwd, timeout):
+        if "libx264" in args:
+            seen_timeouts.append(timeout)
+            raise asyncio.TimeoutError
+        return await real_run(args, cwd, timeout)
+
+    monkeypatch.setattr(export_module, "_run", timing_out)
+    with pytest.raises(export_module.ExportError, match="too long"):
+        await transcode.normalize_video(clip, True)
+    assert seen_timeouts == [settings.TRANSCODE_TIMEOUT_SECONDS]
+    assert not list(tmp_path.glob("*.transcode.*"))
+
+
+def test_transcode_timeout_default_outlasts_the_stale_timer():
+    from app.config import Settings
+    s = Settings()
+    assert s.TRANSCODE_TIMEOUT_SECONDS > s.JOB_STALE_SECONDS
+
+
+@pytest.mark.anyio
+async def test_conversion_progress_counts_as_job_activity(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.services import pipeline
+    from app.services.jobs import job_store
+
+    job = job_store.create(str(tmp_path / "v.mp4"))
+    job.updated_at -= settings.JOB_STALE_SECONDS + 5  # would be failed as stale on the next has_active()
+
+    async def fake_normalize(path, readable, on_progress=None):
+        await on_progress(40)
+        return False
+
+    monkeypatch.setattr(pipeline, "normalize_video", fake_normalize)
+    monkeypatch.setattr(pipeline, "is_video_corrupt", lambda p: False)
+    monkeypatch.setattr(pipeline, "get_video_duration", lambda p: 5.0)
+
+    async def progress_cb(status, progress, message=None):
+        job_store.update(job.job_id, status, progress, message)
+
+    await pipeline.prepare_video(str(tmp_path / "v.mp4"), progress_cb)
+    assert job.message == "Converting video 40%" and job.status == "extracting"
+    assert job_store.has_active()
+    assert job.status == "extracting"  # not failed as stale
