@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest==9.1.1
 anyio==4.12.1
+librosa==1.0.0
+matplotlib==3.11.2

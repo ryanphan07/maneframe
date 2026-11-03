@@ -18,7 +18,7 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (195) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (204) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
@@ -80,6 +80,6 @@ idle -> uploading -> extracting -> analyzing -> synthesizing -> completed
 - Backend routes/entrypoint: `backend/app/main.py`
 - Backend services: `backend/app/services/` (e.g. `jobs.py`, `commentary.py`, `llm.py`, `tts.py`, `video_processor.py`)
 - Backend settings/schemas: `backend/app/config.py`, `backend/app/schemas/`
-- Backend tests: `backend/tests/`; dev scripts: `backend/scripts/`
+- Backend tests: `backend/tests/`; dev scripts: `backend/scripts/` (`beat_sync.py` is a research prototype, see docs/research/beat_sync.md; it needs librosa and matplotlib from requirements-dev.txt)
 - Frontend app/state: `frontend/src/App.jsx`; components: `frontend/src/components/`
 - Docs: root `README.md`; in `docs/`: `STATE.md`, `TASKS.md`, `DECISIONS.md`, `BENCHMARKS.md`, `CONVENTIONS.md`.
