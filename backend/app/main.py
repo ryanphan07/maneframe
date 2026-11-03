@@ -72,6 +72,12 @@ async def global_exception_handler(_, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+@app.get("/api/styles")
+async def list_styles():
+    """The commentary styles the server has prompts for (the files in prompts/styles/)."""
+    return {"styles": llm_service.list_styles(), "default": llm_service.DEFAULT_STYLE}
+
+
 @app.post("/api/upload")
 async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...), style: str = Form(llm_service.DEFAULT_STYLE)):
     styles = llm_service.list_styles()

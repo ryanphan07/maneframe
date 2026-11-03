@@ -12,12 +12,7 @@ const MAX_BACKOFF_MS = 10000;
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_FAILURES = 60; // about 5 minutes without reaching the server
 
-// Must match the files in backend/app/prompts/styles/ (the server rejects other values).
-const STYLES = [
-  { value: 'hype', label: 'Hype' },
-  { value: 'deadpan', label: 'Deadpan' },
-  { value: 'broadcast', label: 'Broadcast' },
-];
+const styleLabel = (value) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const PHASE_LABELS = {
   uploading: 'Uploading',
@@ -47,7 +42,8 @@ function App() {
   const [exportJob, setExportJob] = useState(null);
   const [captions, setCaptions] = useState(true);
   const [rendering, setRendering] = useState(false);
-  const [style, setStyle] = useState('hype');
+  const [styles, setStyles] = useState([]);
+  const [style, setStyle] = useState('');
 
   const socketRef = useRef(null);
   const reconnectTimerRef = useRef(null);
@@ -180,6 +176,18 @@ function App() {
   }, [fail, fetchResult, startPolling]);
 
   useEffect(() => {
+    let cancelled = false;
+    axios.get(`${API_BASE}/api/styles`).then(({ data }) => {
+      if (cancelled) return;
+      setStyles(data.styles);
+      setStyle(data.default);
+    }).catch((error) => {
+      if (!cancelled) toast.error(errorDetail(error, 'Could not load the commentary styles. Is the server running?'), { position: 'top-right' });
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     return () => {
       teardownSocket();
       if (objectUrlRef.current) {
@@ -259,12 +267,12 @@ function App() {
     <div className="App">
       <header className="App-header">
         <h1>Maneframe</h1>
-        <input type="file" accept="video/*" onChange={handleVideoUpload} disabled={inFlight} />
+        <input type="file" accept="video/*" onChange={handleVideoUpload} disabled={inFlight || !style} />
         <label style={{ marginLeft: '0.75rem' }}>
           Style{' '}
           <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={inFlight} aria-label="Commentary style">
-            {STYLES.map(({ value, label }) => (
-              <option key={value} value={value}>{label}</option>
+            {styles.map((value) => (
+              <option key={value} value={value}>{styleLabel(value)}</option>
             ))}
           </select>
         </label>

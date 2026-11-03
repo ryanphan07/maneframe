@@ -145,3 +145,15 @@ async def test_analyze_window_returns_seen_summary(monkeypatch, prompt_dir):
     result = await llm_module.analyze_window(FRAMES, 0.0, 3.0)
     assert result.seen == "blue lion bows"
     assert [q["text"] for q in result.quips] == ["Bow."]
+
+
+def test_styles_route_lists_the_prompt_files():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        resp = client.get("/api/styles")
+    assert resp.status_code == 200
+    assert resp.json() == {"styles": llm_module.list_styles(), "default": llm_module.DEFAULT_STYLE}
+    assert {"hype", "deadpan", "broadcast"} <= set(resp.json()["styles"])
