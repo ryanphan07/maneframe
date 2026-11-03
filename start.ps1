@@ -29,6 +29,12 @@ function Test-Url($url) {
     try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3 | Out-Null; return $true } catch { return $false }
 }
 
+# True when something accepts TCP connections on the port.
+function Test-Port($port) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try { $client.Connect('127.0.0.1', [int]$port); return $true } catch { return $false } finally { $client.Close() }
+}
+
 # --- checks ---
 if (-not (Test-Path $python)) {
     Fail 'No venv at backend\venv. Run: cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements.txt'
@@ -58,6 +64,16 @@ try {
     # --- llama-server, only when /health does not answer ---
     $llmBase = Get-Setting 'LLM_BASE_URL' 'http://127.0.0.1:8080/v1'
     $llmRoot = $llmBase -replace '/v1/?$', ''
+    $llmPort = ([uri]$llmRoot).Port
+    # A port that is taken but not answering /health is not ours to start on; give a loading server 30 s, then stop.
+    if ((-not (Test-Url "$llmRoot/health")) -and (Test-Port $llmPort)) {
+        Write-Host "Port $llmPort is in use; waiting up to 30 s for $llmRoot/health..."
+        $portDeadline = (Get-Date).AddSeconds(30)
+        while (-not (Test-Url "$llmRoot/health") -and (Get-Date) -lt $portDeadline) { Start-Sleep -Seconds 2 }
+        if (-not (Test-Url "$llmRoot/health")) {
+            Fail "Port $llmPort is in use by something that does not answer $llmRoot/health. Stop that program, or set LLM_BASE_URL in backend\.env to a free port."
+        }
+    }
     if (Test-Url "$llmRoot/health") {
         Write-Host "llama-server already running at $llmRoot; leaving it alone."
     } else {
@@ -69,7 +85,6 @@ try {
         if (-not $exe -or -not (Test-Path $exe)) { Fail 'llama-server not found. Set LLAMA_SERVER_PATH in backend\.env.' }
         if (-not $model -or -not (Test-Path $model)) { Fail 'Model not found. Set LLM_MODEL_PATH in backend\.env.' }
         if (-not $mmproj -or -not (Test-Path $mmproj)) { Fail 'mmproj not found. Set LLM_MMPROJ_PATH in backend\.env.' }
-        $llmPort = ([uri]$llmRoot).Port
         $llmLog = Join-Path $logDir 'llama-server.log'
         Write-Host "Starting llama-server (log: $llmLog)"
         $llmArgs = @('-m', $model, '--mmproj', $mmproj, '-c', $ctx, '-np', '1', '-ngl', '99', '--port', $llmPort, '--jinja')
