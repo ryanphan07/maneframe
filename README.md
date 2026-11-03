@@ -29,7 +29,7 @@ Key design points:
 - Server-side scheduling: an audio line never starts before the previous one ends plus 0.3 s. It is shifted up to 2 s later, otherwise dropped. Lines without audio are still shown.
 - Styles and continuity: `hype`, `deadpan` or `broadcast` commentary from a dropdown; each window gets the previous quips and a lion dance glossary. Output is schema-constrained (`LLM_JSON_SCHEMA`).
 - Progressive results: audio is synthesized per window, so the finished part of the commentary plays while the rest is still being analyzed.
-- Phone clips: HEVC, unreadable and rotated uploads are converted to upright H.264 first.
+- Phone clips: HEVC, unreadable and rotated uploads are converted to upright H.264 first (at most 1080p and 30 fps, HDR tone-mapped to SDR; a 40 s 4K 120 fps HDR clip converts in about a minute).
 - mp4 export, moment labels (CSV) and an eval script (`backend/scripts/eval_commentary.py`) for judging commentary quality.
 - One command: `start.ps1` starts the model and the app.
 - Honest failure: a window the model fails on (after one retry) is skipped and reported ("skipped n of m parts" with the time ranges), never filled with invented text; if every window fails the job errors. A failed TTS clip only removes that line's audio.
@@ -87,7 +87,7 @@ Then put `TTS_ENGINE=piper` in `backend/.env` and restart. The voice (two files,
 | `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available, style, ...}` once completed; while running `{partial: {quips, windows_done, total_windows, ready_until}}` or null (finished quips so far, never shown as complete). 404 if unknown |
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
 | `POST /api/jobs/{job_id}/export?captions=1` | Renders the mp4 (same rules and errors as the GET below, errors as JSON) and returns `{"url": "/api/jobs/{id}/export.mp4?captions=1"}`; the web app calls this first, then downloads from the URL so the file is never held in browser memory |
-| `GET /api/jobs/{job_id}/export.mp4?captions=1` | Renders the finished job with ffmpeg and returns an mp4: original audio ducked about 10 dB while a quip plays, quips mixed in at their timestamps, quip text burned in at the bottom when `captions` is 1 (default). Cached per job and captions flag. 409 until completed, 404 if the source video or audio is gone, 500 `{"detail": ...}` if ffmpeg fails |
+| `GET /api/jobs/{job_id}/export.mp4?captions=1` | Renders the finished job with ffmpeg and returns an mp4: original audio ducked 14 dB while a quip plays, each quip compressed and normalized to -14 LUFS (both TTS engines come out equally loud), quips mixed in at their timestamps, quip text burned in at the bottom when `captions` is 1 (default). Cached per job and captions flag. 409 until completed, 404 if the source video or audio is gone, 500 `{"detail": ...}` if ffmpeg fails |
 | `GET /api/jobs/{job_id}/labels` | `{labels: [{id, t, label, quality, note, created_at}], label_options, qualities}`; labels are sorted by time. `label_options` are the terms in `prompts/lion_dance_glossary.txt` plus `other`; `qualities` are `good`, `needs work`, `none`. 404 if the job or its video is gone |
 | `POST /api/jobs/{job_id}/labels` | Body `{t, label, quality, note?}`; returns the new label with 201. 400 `{"detail"}` if `t` is outside 0 to the video duration, the label or quality is not in the lists, or the note is over 500 characters; 422 on a malformed body |
 | `DELETE /api/jobs/{job_id}/labels/{id}` | 204; 404 if the label is unknown |
@@ -109,6 +109,8 @@ Then put `TTS_ENGINE=piper` in `backend/.env` and restart. The voice (two files,
 | `MAX_SHIFT_SEC` | 2.0 | Largest delay allowed to avoid audio overlap |
 | `LABELS_DIR` | `data/labels` | Where moment labels are stored, one `<sha256 of the video>.json` per clip; git-ignored and kept after jobs expire |
 | `FFMPEG_PATH`, `EXPORT_TIMEOUT_SECONDS`, `TRANSCODE_TIMEOUT_SECONDS` | bundled, 1800, 3600 | ffmpeg for mp4 export: empty uses the binary from `imageio-ffmpeg` (installed by requirements.txt); set a path to use your own |
+| `EXPORT_DUCK_DB`, `EXPORT_QUIP_LUFS` | -14, -14 | mp4 export: how far the original audio is lowered under a quip, and the loudness each quip is normalized to |
+| `TRANSCODE_MAX_SIDE`, `TRANSCODE_MAX_FPS` | 1920, 30 | A converted phone clip is scaled to at most this long side and frame rate; HDR (HLG/PQ) is tone-mapped to SDR |
 | `MAX_VIDEO_SECONDS`, `MAX_UPLOAD_MB` | 1800, 2048 | Upload limits (guards, not speed promises) |
 | `JOB_TTL_SECONDS`, `JOB_STALE_SECONDS`, `CLEANUP_INTERVAL_SECONDS` | 3600, 1800, 600 | Job expiry; stale-running-job timeout; cleanup interval |
 | `CORS_ORIGINS`, `PUBLIC_BASE_URL`, `LOG_LEVEL` | localhost:5173/3000, http://localhost:8000, INFO | Server |
@@ -120,7 +122,7 @@ To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python s
 ## Tests
 
 ```powershell
-pytest backend/tests -q          # 264 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest; one real Piper test (skipped without Piper)
+pytest backend/tests -q          # 270 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest; one real Piper test (skipped without Piper)
 cd frontend; npm test; npm run lint; npm run build
 ```
 Not covered by automated tests: the real model, the real edge-tts service, browser playback sync (checked by hand, see How it was tested).
@@ -138,7 +140,7 @@ Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M vi
 The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Re-measured on 2026-11-03 on an idle machine: 212 s cold (about 49 s per uncached call), 165 s on a repeat that reused the prompt cache for window 1, and 182 s with speech switched off (`TTS_ENABLED=false`), so speech is not what limits the speed. Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
-- 264 backend tests (LLM and edge-tts faked, Piper faked plus one real synthesis test that is skipped without Piper; real tiny videos and a real mp3), 13 frontend tests (Vitest), frontend lint and build.
+- 270 backend tests (LLM and edge-tts faked, Piper faked plus one real synthesis test that is skipped without Piper; real tiny videos and a real mp3), 13 frontend tests (Vitest), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
 - Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, other machines.
@@ -152,7 +154,7 @@ The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 202
 
 ## Known limitations
 - Single user, in-memory jobs, no auth, one job at a time (a second upload gets 409; the LLM server is single-slot). Starting the backend deletes leftover job files (`<job id>_<name>` videos, `<job id>` audio and export folders) in `uploads/`; other files there are left alone.
-- Longest clip measured: 40 s (about 4 min of processing). Longer clips, up to `MAX_VIDEO_SECONDS`, are allowed but untested; a 327 s, 6 GB clip was rejected by the default 2 GB upload limit.
+- Longest clip measured: 40 s (about 4 min of processing). Longer clips, up to `MAX_VIDEO_SECONDS`, are allowed but untested; a 327 s, 6 GB clip (4K 120 fps HDR, about 1.1 GB per minute) is rejected by the default 2 GB upload limit after the whole file has been sent; see `docs/research/large_uploads.md` for options. A 40 s cut of that clip (752 MB) was processed end to end.
 - Processing is slow on local hardware: 40 s of video took 189 s (about 4.7x real time) on Qwen3.5-9B, 43 s per model call on average (2026-11-02; 251 s and 54 s on 2026-10-28). Skipped windows leave gaps without commentary; jobs are lost on restart. The 35B-A3B (UD-Q3_K_XL, `-c 8192`) measured 173 s on 2026-11-02 and 212 s cold on 2026-11-03 (5.3x real time) for the same clip; the difference between those days is unexplained.
 - Speech needs internet (edge-tts) unless `TTS_ENGINE=piper`. A transient TTS failure is retried once; if edge-tts stays unreachable the app shows the commentary as text with a notice.
 - `.avi` and some `.mov` files are accepted by the server but may not play in the browser.

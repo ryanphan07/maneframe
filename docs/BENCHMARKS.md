@@ -34,7 +34,7 @@ Per-window LLM seconds:
 
 Notes on this run (written by hand after it; nothing was fixed or tuned during the run):
 - LLM calls are one per window plus retries. shorter_test needed 1 window but made 2 calls and hoco_40s had 4 windows but 5 calls, because the model replied with two JSON objects (`{"seen": ...}` then `{"t": ..., "text": ...}`) or fenced JSON without a `quips` list ("unusable reply on attempt 1" in the log), which triggers the one JSON-nudge retry. That retry roughly doubled the cold shorter_test time. 3 of 9 calls hit it.
-- hoco2026.MOV (326.6 s, 6045 MB) was rejected at upload by the default `MAX_UPLOAD_MB=2048`; no processing happened. No long-clip number exists.
+- hoco2026.MOV (326.6 s, 6045 MB) was rejected at upload by the default `MAX_UPLOAD_MB=2048`; no processing happened. No long-clip number exists. Session 34: a 40 s stream-copy cut of it (752 MB, 3840x2160 120 fps HLG HEVC) converted in about 1 min after the transcode fix (25+ min before, extrapolated from progress; output 1080p 30 fps SDR) and was analyzed end to end; see docs/research/verify_2026-11-03.md.
 - The warm run (same 4.8 s clip, same server, llama-server prompt cache) took 17.6 s and 19.0 s per call versus 54 s cold, 50.1 s total versus 124.3 s.
 - The 12.0 s extracting-to-analyzing step is identical in all four runs; not investigated. Session 23 timed the extracting work alone (`get_video_duration` + `compute_crop_box`) on hoco_40s.mp4 (1080p, 30 fps, H.264), no model needed: 5.5 to 6.1 s with 30 seeks, 1.6 to 2.1 s with the sequential pass, identical crop box (0.109, 0.295, 0.885, 0.927).
 - The server for this run listened on port 8001 because port 8000 was held by another uvicorn process that the benchmark did not start.
