@@ -18,7 +18,7 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (204) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (215) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
@@ -47,6 +47,7 @@ Run from the repo root in PowerShell unless noted. Tests (204) verified 2026-11-
 - The `completed` message carries no result. Fetch it from `GET /api/jobs/{job_id}`, which returns `{job_id, status, progress, message, result}`.
 - Frontend listeners switch on `msg.status` only (never `msg.phase`, never fall back to `msg.message`).
 - `POST /api/jobs/{job_id}/export?captions=1|0` renders the mp4 and returns `{"url"}` for `GET /api/jobs/{job_id}/export.mp4`; errors are JSON `{"detail"}`.
+- `GET|POST /api/jobs/{job_id}/labels`, `DELETE /api/jobs/{job_id}/labels/{id}` and `GET /api/jobs/{job_id}/labels.csv` manage moment labels (`{id, t, label, quality, note, created_at}`) for eval and training data; see README for the full shapes. Labels are stored in `LABELS_DIR` (`data/labels/<sha256 of the video>.json`, git-ignored), keyed by content hash so they outlive the job; the routes need the job and its kept video, so they 404 once the job expires. `t` must lie within the video duration.
 - HTTP errors: `HTTPException` with `{"detail": "<clear message>"}`.
 
 ## Canonical Processing Phases
@@ -79,6 +80,7 @@ idle -> uploading -> extracting -> analyzing -> synthesizing -> completed
 ## File & Folder Layout
 - Backend routes/entrypoint: `backend/app/main.py`
 - Backend services: `backend/app/services/` (e.g. `jobs.py`, `commentary.py`, `llm.py`, `tts.py`, `video_processor.py`)
+- Moment labels: `backend/app/services/labels.py`; stored under `data/` (git-ignored)
 - Backend settings/schemas: `backend/app/config.py`, `backend/app/schemas/`
 - Backend tests: `backend/tests/`; dev scripts: `backend/scripts/` (`beat_sync.py` is a research prototype, see docs/research/beat_sync.md; it needs librosa and matplotlib from requirements-dev.txt)
 - Frontend app/state: `frontend/src/App.jsx`; components: `frontend/src/components/`

@@ -18,6 +18,8 @@ The goal is a better product for real users: lion dance teams turning performanc
 - mp4 export (done, session 21): the video with the commentary audio mixed in and optional burned-in captions; `GET /api/jobs/{id}/export.mp4`. Follow-ups: try it on a real clip, progress for long renders, output size options.
 - Commentary quality (groundwork done, session 22): glossary (DRAFT, needs owner review), `seen` continuity across windows, styles (hype, deadpan, broadcast) and `scripts/eval_commentary.py`. Still to do: fill `examples.txt` with real few-shot examples, run the eval on a live model and compare prompts, models and styles, tune the style texts from the ratings.
 
+- Labeling tool (done, session 25): moment labels in the player, stored by video hash in `data/labels/`, CSV download. Follow-ups: use the labels as eval ground truth in `scripts/eval_commentary.py`; a way to reach labels after the job expires (routes need the live job).
+
 ## Phase 2: speed and robustness
 - 9B vs 35B-A3B throughput table (`FRAME_WIDTH` 640, `FRAMES_PER_WINDOW` 4, `WINDOW_SECONDS` 20, optionally `llama-server -np 2`).
 - Sequential crop sampling (done, session 23): the crop-box probe reads its 30 frames in one forward pass; 5.9 s to 1.8 s on hoco_40s.mp4. `sample_window_frames` (4 frames per window) still seeks.

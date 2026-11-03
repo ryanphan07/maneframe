@@ -60,6 +60,10 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
 | `POST /api/jobs/{job_id}/export?captions=1` | Renders the mp4 (same rules and errors as the GET below, errors as JSON) and returns `{"url": "/api/jobs/{id}/export.mp4?captions=1"}`; the web app calls this first, then downloads from the URL so the file is never held in browser memory |
 | `GET /api/jobs/{job_id}/export.mp4?captions=1` | Renders the finished job with ffmpeg and returns an mp4: original audio ducked about 10 dB while a quip plays, quips mixed in at their timestamps, quip text burned in at the bottom when `captions` is 1 (default). Cached per job and captions flag. 409 until completed, 404 if the source video or audio is gone, 500 `{"detail": ...}` if ffmpeg fails |
+| `GET /api/jobs/{job_id}/labels` | `{labels: [{id, t, label, quality, note, created_at}], label_options, qualities}`; labels are sorted by time. `label_options` are the terms in `prompts/lion_dance_glossary.txt` plus `other`; `qualities` are `good`, `needs work`, `none`. 404 if the job or its video is gone |
+| `POST /api/jobs/{job_id}/labels` | Body `{t, label, quality, note?}`; returns the new label with 201. 400 `{"detail"}` if `t` is outside 0 to the video duration, the label or quality is not in the lists, or the note is over 500 characters; 422 on a malformed body |
+| `DELETE /api/jobs/{job_id}/labels/{id}` | 204; 404 if the label is unknown |
+| `GET /api/jobs/{job_id}/labels.csv` | The labels as a CSV download (`id,t,label,quality,note,created_at`; notes starting with `=`, `+`, `-` or `@` get a leading `'`) |
 | `GET /uploads/audio/{job_id}/{file}.mp3` | Generated speech clips. Raw videos are never served |
 
 ## Configuration (`backend/.env`, see `backend/.env.example`)
@@ -71,6 +75,7 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `MAX_QUIPS_PER_WINDOW`, `MIN_QUIP_GAP_SEC` | 3, 4.5 | Quip budget (4.5 s is about the speech time of an 8-word line) |
 | `TTS_VOICE`, `TTS_RATE`, `TTS_TIMEOUT_SECONDS`, `TTS_CONCURRENCY`, `TTS_RETRIES`, `TTS_RETRY_DELAY_SECONDS`, `TTS_ENABLED` | en-US-GuyNeural, +10%, 30, 1, 1, 1, true | Speech |
 | `MAX_SHIFT_SEC` | 2.0 | Largest delay allowed to avoid audio overlap |
+| `LABELS_DIR` | `data/labels` | Where moment labels are stored, one `<sha256 of the video>.json` per clip; git-ignored and kept after jobs expire |
 | `FFMPEG_PATH`, `EXPORT_TIMEOUT_SECONDS` | bundled, 1800 | ffmpeg for mp4 export: empty uses the binary from `imageio-ffmpeg` (installed by requirements.txt); set a path to use your own |
 | `MAX_VIDEO_SECONDS`, `MAX_UPLOAD_MB` | 1800, 2048 | Upload limits (guards, not speed promises) |
 | `JOB_TTL_SECONDS`, `JOB_STALE_SECONDS`, `CLEANUP_INTERVAL_SECONDS` | 3600, 1800, 600 | Job expiry; stale-running-job timeout; cleanup interval |
