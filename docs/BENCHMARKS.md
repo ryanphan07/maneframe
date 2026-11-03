@@ -72,3 +72,21 @@ Notes on this run (with the multi-object JSON fix; nothing was tuned during the 
 - hoco_40s: 250.8 s versus 298.6 s before (about 6.2x real time versus 7.4x); shorter_test cold: 66.1 s versus 124.3 s. Per-call time is unchanged at about 54 s; the gain is the removed retries. Quips went 7 to 6 (model output varies run to run).
 - hoco2026.MOV and the warm repeat were not run this time. Model: Qwen3.5-9B Q4_K_M, not the 35B-A3B.
 - Quality of the commentary and the audio were not judged here.
+
+## 2026-11-02 22:13: 9B vs 35B-A3B, live verification (session 26)
+
+Git commit ea1d2b8. Clip: hoco_40s.mp4 (40.2 s, 101.7 MB), style hype, default settings (same as the 2026-10-28 section), edge-tts 7.3.1, uvicorn started by hand on port 8000, llama-server with `-np 1 -ngl 99 --port 8080 --jinja`. Baseline for comparison is the 2026-10-28 20:41 row: 251 s, 54.9 s per window, 2950 prompt tokens.
+
+| Model | llama-server `-c` | Total s | s/window (4 windows) | Prompt tokens (avg) | Quips (audio) | Retries | Skipped | Failures (TTS / LLM) |
+|---|---|---|---|---|---|---|---|---|
+| Qwen3.5-9B Q4_K_M | 32768 | 188.5 | 43.1 (45.5, 40.9, 43.0, 43.1) | 3560 | 7 (7) | 0 | 0 | 0 / 0 |
+| Qwen3.6-35B-A3B UD-Q3_K_XL | 8192 | 172.8 | 38.5 (45.2, 36.6, 36.8, 35.5) | 3582 | 7 (7) | 0 | 0 | 0 / 0 |
+
+Notes:
+- Both runs: 4 LLM calls for 4 windows, 0 "unusable reply" lines in the backend log, no audio overlaps. The benchmark table row for the 35B shows 1 shift, but that line (t=37.62 to 37.88, 22:29:42) was written by the eval_commentary run that followed and is attributed to the benchmark job only because the log has no job id; the benchmark job itself shifted nothing. The later 35B smoke job shifted one quip by 0.41 s (25.83 to 26.24). Spoken seconds: 28.7 (9B), 31.7 (35B).
+- Prompt tokens are about 600 higher than the 2026-10-28 baseline (3560 vs 2950), from the prompt and context changes since then, yet the 9B took 43.1 s per window against 54.9 s. Not investigated; llama-server build and GPU state may differ from the earlier run (the 2026-10-28 build is not recorded).
+- The 35B fits `-c 8192` for these prompts (about 3600 prompt tokens plus 140 completion tokens per call). The 35B is a mixture-of-experts model with about 3B active parameters, which is the likely reason it is not slower than the 9B; not measured separately.
+- `eval_commentary.py` on the same clip, styles hype and deadpan (4 windows each): 9B wrote 23 quips (11 hype, 12 deadpan), 35B wrote 24 (12 and 12). Quality was not rated here.
+- API smoke test, both models: upload completed (162 s 9B, 135 s 35B including TTS, so faster than the benchmark pass because of the prompt cache); POST export returned a url; the mp4 is 40.17 s, 1920x1080 H.264 (High) plus AAC LC 48 kHz stereo; a frame extracted while a quip was active shows the caption at the bottom (looked at: 9B at 12 s, 35B at 17 s); adding, listing, deleting and CSV of a label worked. The first label attempt returned 422 because the smoke script sent `quality` as a number; the API takes the strings in `qualities` ("good", "needs work", "none"), which is by design.
+- Smoke-test labels were deleted afterwards. Models were not changed; the default stays the 9B.
+

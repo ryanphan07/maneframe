@@ -100,9 +100,9 @@ Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M vi
 | Clip | Length | Processing | Quips (with audio) | Spoken | Overlaps | Shifted / dropped / TTS failed |
 |---|---|---|---|---|---|---|
 | shorter_test.mp4 | 4.8 s | 66 s | 1 (1) | 3.2 s | 0 | 0 / 0 / 0 |
-| hoco_40s.mp4 | 40.2 s | 251 s | 6 (6) | 22.8 s | 0 | 0 / 0 / 0 |
+| hoco_40s.mp4 | 40.2 s | 189 s | 7 (7) | 28.7 s | 0 | 0 / 0 / 0 |
 
-Run on 2026-10-28 with `LLM_JSON_SCHEMA=true` (the default): 0 unusable-reply retries in 5 model calls, about 54 s per call. The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
+The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
 - 164 automated tests (LLM and edge-tts faked; real tiny videos and a real mp3), frontend lint and build.
@@ -120,7 +120,7 @@ Run on 2026-10-28 with `LLM_JSON_SCHEMA=true` (the default): 0 unusable-reply re
 ## Known limitations
 - Single user, in-memory jobs, no auth, one job at a time (a second upload gets 409; the LLM server is single-slot). Starting the backend deletes leftover job files (`<job id>_<name>` videos, `<job id>` audio and export folders) in `uploads/`; other files there are left alone.
 - Longest clip measured: 40 s (about 4 min of processing). Longer clips, up to `MAX_VIDEO_SECONDS`, are allowed but untested; a 327 s, 6 GB clip was rejected by the default 2 GB upload limit.
-- Processing is slow on local hardware: 40 s of video took 251 s (about 6x real time) on Qwen3.5-9B, 54 s per model call on average. Skipped windows leave gaps without commentary; jobs are lost on restart. The 35B-A3B model is unmeasured.
+- Processing is slow on local hardware: 40 s of video took 189 s (about 4.7x real time) on Qwen3.5-9B, 43 s per model call on average (2026-11-02; 251 s and 54 s on 2026-10-28). Skipped windows leave gaps without commentary; jobs are lost on restart. The 35B-A3B (UD-Q3_K_XL, `-c 8192`) measured 173 s for the same clip.
 - Speech needs internet (edge-tts). A transient TTS failure is retried once; if edge-tts stays unreachable the app shows the commentary as text with a notice.
 - `.avi` and some `.mov` files are accepted by the server but may not play in the browser.
 - Runs natively on Windows only; there are no Docker files.
