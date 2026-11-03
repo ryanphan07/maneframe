@@ -210,12 +210,22 @@ def sample_window_frames(
     n = frame_count_for_window(start, end, max_frames)
     frames: List[Dict[str, Any]] = []
     try:
-        for i in range(n):
-            t = start + (end - start) * (i + 0.5) / n
-            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if not fps or fps <= 0:
+            raise ValueError("The video has no usable frame rate")
+        times = [start + (end - start) * (i + 0.5) / n for i in range(n)]
+        # One seek to the first sample, then a forward pass: grab() skips the frames in between without converting them,
+        # which is much cheaper than a keyframe seek and decode per sample.
+        cap.set(cv2.CAP_PROP_POS_MSEC, times[0] * 1000)
+        index = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        for t in times:
+            target = int(t * fps + 0.5)  # the frame a seek to t lands on (nearest, halves up)
+            while index < target and cap.grab():
+                index += 1
             ok, frame = cap.read()
+            index += 1
             if not ok or frame is None:
-                continue
+                break
             if box:
                 h, w = frame.shape[:2]
                 x0, y0, x1, y1 = box

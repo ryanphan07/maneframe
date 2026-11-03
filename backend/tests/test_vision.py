@@ -126,6 +126,46 @@ def test_sample_window_frames_even_spacing_width_and_shared_box(moving_video):
         assert img.shape[0] == int(90 * 128 / 160)  # crop is 160x90, aspect preserved
 
 
+def seeking_window_frames(path, start, end, n, width, box):
+    """The previous implementation, kept as the reference: one seek per frame."""
+    cap = cv2.VideoCapture(path)
+    out = []
+    for i in range(n):
+        t = start + (end - start) * (i + 0.5) / n
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, frame = cap.read()
+        assert ok
+        if box:
+            h, w = frame.shape[:2]
+            x0, y0, x1, y1 = box
+            frame = frame[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
+        fh, fw = frame.shape[:2]
+        out.append((round(t, 2), cv2.resize(frame, (width, max(1, int(fh * width / fw))), interpolation=cv2.INTER_AREA)))
+    cap.release()
+    return out
+
+
+@pytest.mark.parametrize("window", [(0.0, 6.0), (1.0, 3.5), (2.3, 5.9)])
+def test_sequential_window_sampling_matches_one_seek_per_frame(tmp_path, window):
+    def paint(frame, i):  # every frame is different, so an off-by-one frame shows up as a large difference
+        frame[:] = (i * 4, 255 - i * 4, 60)
+        frame[10:50, (i * 5) % 280:(i * 5) % 280 + 40] = 255
+    clip = write_video(tmp_path / "numbered.avi", paint)
+    box = (0.1, 0.0, 0.9, 1.0)
+    new = vp.sample_window_frames(clip, window[0], window[1], 6, 128, box)
+    ref = seeking_window_frames(clip, window[0], window[1], vp.frame_count_for_window(*window, 6), 128, box)
+    assert [f["timestamp"] for f in new] == [t for t, _ in ref]
+    for f, (_, expected) in zip(new, ref):
+        got = cv2.imdecode(np.frombuffer(base64.b64decode(f["image_data"]), np.uint8), cv2.IMREAD_COLOR)
+        assert got.shape == expected.shape
+        assert np.abs(got.astype(int) - expected.astype(int)).mean() < 3  # JPEG noise only
+
+
+def test_sample_window_frames_stops_at_the_end_of_the_video(still_video):
+    frames = vp.sample_window_frames(still_video, 4.0, 9.0, 4, 64, None)  # the clip is 6 s long
+    assert 0 < len(frames) < 4
+
+
 def test_sample_window_frames_without_box_keeps_full_frame_aspect(still_video):
     frames = vp.sample_window_frames(still_video, 0.0, 2.0, 6, 160, None)
     assert len(frames) == 2
