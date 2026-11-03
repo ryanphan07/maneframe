@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 2048
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    LABELS_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "labels"))  # kept after jobs expire
     UPLOAD_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
 
 

@@ -29,6 +29,9 @@ docs/OWNER_TODO.md
 docs/HANDOFF.md
 docs/AUDIT.md
 
+# Moment labels (eval and training data)
+data/
+
 # Local commentary eval inputs and results
 eval/clips.txt
 eval/results/
