@@ -87,7 +87,7 @@ async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Option
         label = f"window {i + 1}/{len(windows)}"
         print(f"  {Path(clip).name} [{style}] {label}", flush=True)
         try:
-            result = await commentary._analyze_with_retry(path, start, end, box, context, label, style)
+            result = await commentary.analyze_window_with_retry(path, start, end, box, context, label, style)
         except Exception as exc:
             if commentary.is_unreachable(exc):
                 raise

@@ -90,7 +90,7 @@ def schedule_quips(quips: List[Dict[str, Any]], video_duration: Optional[float] 
     return result
 
 
-async def _analyze_with_retry(
+async def analyze_window_with_retry(
     video_path: str,
     start: float,
     end: float,
@@ -157,7 +157,7 @@ async def process_video_commentary(
         await _report("analyzing", 20 + int(45 * i / total_windows), analyzing_message(i, total_windows, avg))
         label = f"window {i + 1}/{total_windows}"
         try:
-            result = await _analyze_with_retry(video_path, start, end, box, context, label, style)
+            result = await analyze_window_with_retry(video_path, start, end, box, context, label, style)
         except Exception as exc:
             if is_unreachable(exc):
                 logger.error("%s: the model server is unreachable; failing the job instead of skipping", label)

@@ -43,7 +43,7 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 
 ### D4 decision (revised): B
 - Supersedes "D4 decision: A". The project goal is now real users (see docs/TASKS.md), and losing up to 45 minutes of work to one bad window is not acceptable for them.
-- Policy: a window that fails is retried once, then skipped and logged. An unusable model reply is already retried once inside `analyze_window`; other failures (transport, timeout) get one more attempt in `commentary._analyze_with_retry`; frames that cannot be sampled are retried the same way. Worst case for a hung model is two timeouts per window.
+- Policy: a window that fails is retried once, then skipped and logged. An unusable model reply is already retried once inside `analyze_window`; other failures (transport, timeout) get one more attempt in `commentary.analyze_window_with_retry`; frames that cannot be sampled are retried the same way. Worst case for a hung model is two timeouts per window.
 - The result carries `skipped` (list of `{start, end}` seconds) and `total_windows`; the job message reads "Commentary ready, skipped n of m parts" and the player lists the skipped ranges. Nothing is invented for a skipped range, so the honesty rule holds.
 - A job where every window fails still ends in `error`, with the category message of the last failure. A job where no window failed but no quips were produced is also still an error.
 - Option C (progressive results) stays in phase 2.
