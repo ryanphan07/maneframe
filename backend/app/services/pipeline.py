@@ -8,7 +8,7 @@ from typing import Optional
 from app.config import settings
 from app.services.export import forget_job_locks
 from app.services.commentary import process_video_commentary
-from app.services.llm import LLMOutputError
+from app.services.llm import DEFAULT_STYLE, LLMOutputError
 from app.services.jobs import job_store
 
 logger = logging.getLogger("maneframe.pipeline")
@@ -88,7 +88,7 @@ def sweep_uploads() -> int:
     return removed
 
 
-async def run_pipeline(job_id: str, video_path: str) -> None:
+async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE) -> None:
     task = asyncio.current_task()
     if task is not None:
         job_store.register_task(job_id, task)
@@ -99,7 +99,7 @@ async def run_pipeline(job_id: str, video_path: str) -> None:
             logger.warning("Progress update failed for job %s", job_id, exc_info=True)
 
     try:
-        result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb)
+        result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb, style=style)
         job_store.complete(job_id, result)  # the source video stays until the job expires, for mp4 export
     except asyncio.CancelledError:
         logger.warning("Pipeline for job %s was cancelled", job_id)

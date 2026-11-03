@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from app.config import settings
@@ -14,6 +15,20 @@ logger = logging.getLogger("maneframe.commentary")
 
 AUDIO_GAP_SEC = 0.3
 MAX_CONSECUTIVE_SKIPS = 3
+CONTEXT_WINDOWS = 2  # how many earlier windows' "seen" summaries and recent quips go into the next window's message
+
+
+@dataclass
+class Continuity:
+    """What the next window's message carries over from earlier windows. A skipped window leaves it unchanged."""
+    quips: List[str] = field(default_factory=list)
+    seen: List[str] = field(default_factory=list)
+
+    def update(self, result: "llm_service.WindowResult") -> None:
+        if result.quips:
+            self.quips = [q["text"] for q in result.quips[-CONTEXT_WINDOWS:]]
+        if result.seen:
+            self.seen = (self.seen + [result.seen])[-CONTEXT_WINDOWS:]
 
 
 def is_unreachable(exc: BaseException) -> bool:
@@ -80,9 +95,10 @@ async def _analyze_with_retry(
     start: float,
     end: float,
     box: Any,
-    previous: List[str],
+    context: Continuity,
     label: str,
-) -> List[Dict[str, Any]]:
+    style: str = llm_service.DEFAULT_STYLE,
+) -> "llm_service.WindowResult":
     """Sample and analyze one window. A reply that was not usable JSON was already retried inside analyze_window;
     any other failure (timeout, server error) gets one more attempt here. An unreachable server is not retried."""
     for attempt in range(2):
@@ -93,7 +109,9 @@ async def _analyze_with_retry(
         if not frames:
             raise ValueError(f"No frames could be extracted for {label}")
         try:
-            return await llm_service.analyze_window(frames, start, end, previous, label=label)
+            return await llm_service.analyze_window(
+                frames, start, end, context.quips, label=label, earlier_seen=context.seen, style=style,
+            )
         except llm_service.LLMOutputError:
             raise
         except Exception as exc:
@@ -106,7 +124,8 @@ async def _analyze_with_retry(
 async def process_video_commentary(
     video_path: str,
     job_id: Optional[str] = None,
-    progress_cb: Optional[Callable[[str, int, Optional[str]], Awaitable[None]]] = None
+    progress_cb: Optional[Callable[[str, int, Optional[str]], Awaitable[None]]] = None,
+    style: str = llm_service.DEFAULT_STYLE,
 ) -> CommentaryResponse:
     video_id = job_id or "default"
     started = time.monotonic()
@@ -128,7 +147,7 @@ async def process_video_commentary(
         raise ValueError("No frames could be extracted from video")
 
     raw_quips: List[Dict[str, Any]] = []
-    previous: List[str] = []
+    context = Continuity()
     skipped: List[SkippedRange] = []
     consecutive_skips = 0
     total_windows = len(windows)
@@ -138,7 +157,7 @@ async def process_video_commentary(
         await _report("analyzing", 20 + int(45 * i / total_windows), analyzing_message(i, total_windows, avg))
         label = f"window {i + 1}/{total_windows}"
         try:
-            window_quips = await _analyze_with_retry(video_path, start, end, box, previous, label)
+            result = await _analyze_with_retry(video_path, start, end, box, context, label, style)
         except Exception as exc:
             if is_unreachable(exc):
                 logger.error("%s: the model server is unreachable; failing the job instead of skipping", label)
@@ -151,9 +170,8 @@ async def process_video_commentary(
                 raise
             continue
         consecutive_skips = 0
-        raw_quips.extend(window_quips)
-        if window_quips:
-            previous = [q["text"] for q in window_quips[-2:]]
+        raw_quips.extend(result.quips)
+        context.update(result)
 
     if skipped:
         logger.warning("Skipped %d of %d windows: %s", len(skipped), total_windows, [(r.start, r.end) for r in skipped])
@@ -220,4 +238,5 @@ async def process_video_commentary(
         skipped=skipped,
         total_windows=total_windows,
         audio_available=audio_available,
+        style=style,
     )

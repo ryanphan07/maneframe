@@ -20,3 +20,4 @@ class CommentaryResponse(BaseModel):
     total_windows: int = 0
     video_url: Optional[str] = None
     audio_available: bool = False
+    style: Optional[str] = None

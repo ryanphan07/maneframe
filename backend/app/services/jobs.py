@@ -27,6 +27,7 @@ class JobNotFoundError(KeyError):
 class Job(BaseModel):
     job_id: str
     video_path: str
+    style: str = "hype"
     status: str = "uploading"
     progress: int = 0
     message: Optional[str] = None
@@ -52,13 +53,13 @@ class JobStore:
         self._tasks[job_id] = task
         task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
 
-    def create(self, video_path: str, job_id: Optional[str] = None) -> Job:
+    def create(self, video_path: str, job_id: Optional[str] = None, style: str = "hype") -> Job:
         self.purge_expired()
         if job_id is None:
             job_id = str(uuid.uuid4())
         if job_id in self._jobs:
             raise ValueError(f"Job {job_id} already exists")
-        job = Job(job_id=job_id, video_path=video_path)
+        job = Job(job_id=job_id, video_path=video_path, style=style)
         self._jobs[job_id] = job
         logger.info(f"Created job {job_id}")
         return job

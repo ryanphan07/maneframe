@@ -19,8 +19,8 @@ def fake_video(monkeypatch):
 
 
 def fake_llm_returning(by_window):
-    async def fake(frames, start, end, previous=None, label=""):
-        return list(by_window[int(start // 10)])
+    async def fake(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult(list(by_window[int(start // 10)]))
     return fake
 
 

@@ -33,8 +33,8 @@ def client(upload_dir):
 @pytest.fixture
 def fake_ai(monkeypatch):
     monkeypatch.setattr(settings, "MIN_QUIP_GAP_SEC", 2.5)
-    async def fake_llm(frames, start, end, previous=None, label=""):
-        return [{"timestamp": 0.0, "text": "first"}, {"timestamp": 3.0, "text": "second"}]
+    async def fake_llm(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult([{"timestamp": 0.0, "text": "first"}, {"timestamp": 3.0, "text": "second"}])
 
     async def fake_tts(quip, video_id=None):
         return {"timestamp": quip["timestamp"], "text": quip["text"], "audio_url": f"http://test/{video_id}/{quip['timestamp']}.mp3"}
@@ -357,3 +357,23 @@ def test_kept_video_is_deleted_when_the_job_expires(client, upload_dir, fake_ai,
     assert upload(client, video_bytes).status_code == 200  # the next upload purges the expired job and its files
     assert not video.exists()
     assert not (upload_dir / "exports" / job_id).exists()
+
+
+def test_upload_style_defaults_to_hype_and_is_in_result(client, upload_dir, fake_ai, video_bytes):
+    job_id = upload(client, video_bytes).json()["job_id"]
+    assert client.get(f"/api/jobs/{job_id}").json()["result"]["style"] == "hype"
+
+
+def test_upload_style_is_passed_through_to_the_result(client, upload_dir, fake_ai, video_bytes):
+    resp = client.post("/api/upload", files={"file": ("clip.avi", video_bytes, "video/x-msvideo")}, data={"style": "deadpan"})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    assert client.get(f"/api/jobs/{job_id}").json()["result"]["style"] == "deadpan"
+    assert job_store.get(job_id).style == "deadpan"
+
+
+def test_upload_rejects_unknown_style_without_writing(client, upload_dir, video_bytes):
+    resp = client.post("/api/upload", files={"file": ("clip.avi", video_bytes, "video/x-msvideo")}, data={"style": "../hype"})
+    assert resp.status_code == 400
+    assert "broadcast, deadpan, hype" in resp.json()["detail"]
+    assert os.listdir(upload_dir / "videos") == []

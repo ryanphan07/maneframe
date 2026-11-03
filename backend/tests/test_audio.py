@@ -249,8 +249,8 @@ def one_window(monkeypatch):
     monkeypatch.setattr(vp, "compute_crop_box", lambda p, d: None)
     monkeypatch.setattr(vp, "sample_window_frames", lambda p, s, e, n, w, box=None: [{"timestamp": s, "image_data": "abc"}])
 
-    async def analyze(frames, start, end, previous=None, label=""):
-        return [{"timestamp": 1.0, "text": "one two three"}, {"timestamp": 4.0, "text": "four five six"}]
+    async def analyze(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult([{"timestamp": 1.0, "text": "one two three"}, {"timestamp": 4.0, "text": "four five six"}])
 
     monkeypatch.setattr(llm_module, "analyze_window", analyze)
 

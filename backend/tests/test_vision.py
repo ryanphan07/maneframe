@@ -138,10 +138,20 @@ FRAMES = [{"timestamp": 0.5 + i, "image_data": "QUJD" * 50} for i in range(3)]
 def prompt_file(tmp_path, monkeypatch):
     path = tmp_path / "prompt.txt"
     path.write_text("You are a commentator. Write at most MAX_QUIPS quips.", encoding="utf-8")
+    glossary = tmp_path / "glossary.txt"
+    glossary.write_text("DRAFT: owner to review", encoding="utf-8")
+    examples = tmp_path / "examples.txt"
+    examples.write_text("# format comment only", encoding="utf-8")
+    styles = tmp_path / "styles"
+    styles.mkdir()
+    (styles / "hype.txt").write_text("Be loud.", encoding="utf-8")
     monkeypatch.setattr(llm_module, "PROMPT_PATH", path)
-    llm_module._read_prompt_file.cache_clear()
+    monkeypatch.setattr(llm_module, "GLOSSARY_PATH", glossary)
+    monkeypatch.setattr(llm_module, "EXAMPLES_PATH", examples)
+    monkeypatch.setattr(llm_module, "STYLES_DIR", styles)
+    llm_module.clear_prompt_cache()
     yield path
-    llm_module._read_prompt_file.cache_clear()
+    llm_module.clear_prompt_cache()
 
 
 def use_client(monkeypatch, replies):
@@ -153,13 +163,16 @@ def use_client(monkeypatch, replies):
 @pytest.mark.anyio
 async def test_request_structure(monkeypatch, prompt_file):
     client = use_client(monkeypatch, [GOOD])
-    quips = await llm_module.analyze_window(FRAMES, 0.0, 3.0, ["old one", "old two"])
+    quips = (await llm_module.analyze_window(FRAMES, 0.0, 3.0, ["old one", "old two"])).quips
 
     assert [q["text"] for q in quips] == ["Here we go", "Big leap!"]  # sorted by time
     (call,) = client.calls
     system, user = call["messages"]
     assert system["role"] == "system"
-    assert system["content"] == f"You are a commentator. Write at most {settings.MAX_QUIPS_PER_WINDOW} quips."
+    assert system["content"] == (
+        f"You are a commentator. Write at most {settings.MAX_QUIPS_PER_WINDOW} quips."
+        "\n\nCOMMENTARY STYLE FOR THIS RUN\nBe loud."
+    )
     parts = user["content"]
     images = [p for p in parts if p["type"] == "image_url"]
     assert len(images) == len(FRAMES)
@@ -181,21 +194,21 @@ async def test_request_structure(monkeypatch, prompt_file):
 async def test_thinking_setting_and_think_blocks(monkeypatch, prompt_file):
     monkeypatch.setattr(settings, "LLM_ENABLE_THINKING", True)
     client = use_client(monkeypatch, ["<think>hmm {not json}</think>\n" + GOOD])
-    quips = await llm_module.analyze_window(FRAMES, 0.0, 3.0)
+    quips = (await llm_module.analyze_window(FRAMES, 0.0, 3.0)).quips
     assert len(quips) == 2
     assert client.calls[0]["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
 
 
 def test_prompt_placeholder_only_replaces_exact_token(monkeypatch, prompt_file):
     prompt_file.write_text("MAX_QUIPS and MAX_QUIPS_PER_WINDOW", encoding="utf-8")
-    llm_module._read_prompt_file.cache_clear()
+    llm_module.clear_prompt_cache()
     monkeypatch.setattr(settings, "MAX_QUIPS_PER_WINDOW", 7)
-    assert llm_module.load_system_prompt() == "7 and MAX_QUIPS_PER_WINDOW"
+    assert llm_module.load_system_prompt().startswith("7 and MAX_QUIPS_PER_WINDOW")
 
 
 def test_missing_prompt_file_fails_loudly(monkeypatch, tmp_path):
     monkeypatch.setattr(llm_module, "PROMPT_PATH", tmp_path / "missing.txt")
-    llm_module._read_prompt_file.cache_clear()
+    llm_module.clear_prompt_cache()
     with pytest.raises(FileNotFoundError):
         llm_module.load_system_prompt()
 
@@ -251,7 +264,7 @@ def test_extract_quips_fails_without_usable_content(reply):
 @pytest.mark.anyio
 async def test_multi_object_reply_needs_no_retry(monkeypatch, prompt_file):
     client = use_client(monkeypatch, [SEEN + "\n" + BARE])
-    quips = await llm_module.analyze_window(FRAMES, 0.0, 3.0)
+    quips = (await llm_module.analyze_window(FRAMES, 0.0, 3.0)).quips
     assert [q["text"] for q in quips] == ["First", "Second"] and len(client.calls) == 1
 
 
@@ -270,7 +283,7 @@ async def test_unusable_reply_logged_in_full_capped(monkeypatch, prompt_file, ca
 @pytest.mark.anyio
 async def test_retry_once_with_json_nudge(monkeypatch, prompt_file):
     client = use_client(monkeypatch, ["totally not json", GOOD])
-    quips = await llm_module.analyze_window(FRAMES, 0.0, 3.0)
+    quips = (await llm_module.analyze_window(FRAMES, 0.0, 3.0)).quips
     assert len(quips) == 2 and len(client.calls) == 2
     assert "Return only the JSON" in client.calls[1]["messages"][1]["content"][0]["text"]
     assert "Return only the JSON" not in client.calls[0]["messages"][1]["content"][0]["text"]
@@ -363,9 +376,9 @@ async def test_merge_enforces_gap_across_windows_and_passes_last_two_quips(monke
         [q(10.5, "too soon"), q(14.0, "fine")],
     ]
 
-    async def fake_analyze(frames, start, end, previous=None, label=""):
+    async def fake_analyze(frames, start, end, previous=None, label="", **_):
         seen_previous.append(list(previous))
-        return replies[len(seen_previous) - 1]
+        return llm_module.WindowResult(replies[len(seen_previous) - 1])
 
     monkeypatch.setattr(llm_module, "analyze_window", fake_analyze)
     result = await commentary_module.process_video_commentary("v.mp4")
@@ -378,11 +391,11 @@ async def test_merge_enforces_gap_across_windows_and_passes_last_two_quips(monke
 async def test_failed_window_is_skipped_and_reported(monkeypatch, two_windows, caplog):
     calls = []
 
-    async def flaky(frames, start, end, previous=None, label=""):
+    async def flaky(frames, start, end, previous=None, label="", **_):
         calls.append(start)
         if start > 0:
             raise llm_module.LLMOutputError("window 2 gave garbage")
-        return [q(1.0, "one")]
+        return llm_module.WindowResult([q(1.0, "one")])
 
     monkeypatch.setattr(llm_module, "analyze_window", flaky)
     with caplog.at_level(logging.WARNING, logger="maneframe.commentary"):
@@ -399,11 +412,11 @@ async def test_failed_window_is_skipped_and_reported(monkeypatch, two_windows, c
 async def test_transport_failure_gets_one_retry_then_succeeds(monkeypatch, two_windows):
     calls = []
 
-    async def flaky(frames, start, end, previous=None, label=""):
+    async def flaky(frames, start, end, previous=None, label="", **_):
         calls.append(start)
         if start > 0 and calls.count(start) == 1:
             raise TimeoutError("slow")
-        return [q(start + 1.0, f"line {int(start)}")]
+        return llm_module.WindowResult([q(start + 1.0, f"line {int(start)}")])
 
     monkeypatch.setattr(llm_module, "analyze_window", flaky)
     result = await commentary_module.process_video_commentary("v.mp4")
@@ -415,11 +428,11 @@ async def test_transport_failure_gets_one_retry_then_succeeds(monkeypatch, two_w
 async def test_transport_failure_twice_skips_window(monkeypatch, two_windows):
     calls = []
 
-    async def flaky(frames, start, end, previous=None, label=""):
+    async def flaky(frames, start, end, previous=None, label="", **_):
         calls.append(start)
         if start > 0:
             raise TimeoutError("slow")
-        return [q(1.0, "one")]
+        return llm_module.WindowResult([q(1.0, "one")])
 
     monkeypatch.setattr(llm_module, "analyze_window", flaky)
     result = await commentary_module.process_video_commentary("v.mp4")
@@ -435,7 +448,7 @@ async def test_every_window_failing_still_raises_and_skips_tts(monkeypatch, two_
         tts_calls.append(quip)
         return {**quip, "audio_url": None}
 
-    async def always_garbage(frames, start, end, previous=None, label=""):
+    async def always_garbage(frames, start, end, previous=None, label="", **_):
         raise llm_module.LLMOutputError(f"{label} gave garbage")
 
     monkeypatch.setattr(tts_module, "generate_audio_clip", spy_tts)
@@ -450,12 +463,12 @@ def _set_windows(monkeypatch, count):
 
 
 def _fail_windows(monkeypatch, failing, error, calls):
-    async def fake(frames, start, end, previous=None, label=""):
+    async def fake(frames, start, end, previous=None, label="", **_):
         index = int(start // 10)
         calls.append(index)
         if index in failing:
             raise error
-        return [q(start + 1.0, f"line {index}")]
+        return llm_module.WindowResult([q(start + 1.0, f"line {index}")])
 
     monkeypatch.setattr(llm_module, "analyze_window", fake)
 
@@ -533,10 +546,10 @@ async def test_a_success_resets_the_consecutive_skip_count(monkeypatch, two_wind
 
 @pytest.mark.anyio
 async def test_partial_failure_job_completes_with_skipped_count_in_message(monkeypatch, two_windows, tmp_path):
-    async def flaky(frames, start, end, previous=None, label=""):
+    async def flaky(frames, start, end, previous=None, label="", **_):
         if start > 0:
             raise llm_module.LLMOutputError("garbage")
-        return [q(1.0, "one")]
+        return llm_module.WindowResult([q(1.0, "one")])
 
     monkeypatch.setattr(llm_module, "analyze_window", flaky)
     video = tmp_path / "v.avi"
@@ -552,8 +565,8 @@ async def test_partial_failure_job_completes_with_skipped_count_in_message(monke
 
 @pytest.mark.anyio
 async def test_no_quips_at_all_is_an_error(monkeypatch, two_windows):
-    async def empty(frames, start, end, previous=None, label=""):
-        return []
+    async def empty(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult([])
 
     monkeypatch.setattr(llm_module, "analyze_window", empty)
     with pytest.raises(llm_module.LLMOutputError, match="no usable commentary"):
@@ -562,7 +575,7 @@ async def test_no_quips_at_all_is_an_error(monkeypatch, two_windows):
 
 @pytest.mark.anyio
 async def test_failed_window_ends_job_in_error_with_generic_message_and_logs_cause(monkeypatch, two_windows, tmp_path, caplog):
-    async def boom(frames, start, end, previous=None, label=""):
+    async def boom(frames, start, end, previous=None, label="", **_):
         raise RuntimeError("secret connection refused detail")
 
     monkeypatch.setattr(llm_module, "analyze_window", boom)
@@ -582,8 +595,8 @@ async def test_failed_window_ends_job_in_error_with_generic_message_and_logs_cau
 
 @pytest.mark.anyio
 async def test_total_pipeline_time_is_logged(monkeypatch, two_windows, caplog):
-    async def fake_analyze(frames, start, end, previous=None, label=""):
-        return [q(start + 1.0, "hello there")]
+    async def fake_analyze(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult([q(start + 1.0, "hello there")])
 
     monkeypatch.setattr(llm_module, "analyze_window", fake_analyze)
     with caplog.at_level(logging.INFO, logger="maneframe.commentary"):
@@ -604,7 +617,7 @@ async def test_http_400_with_schema_retries_once_without_response_format(monkeyp
     monkeypatch.setattr(settings, "LLM_JSON_SCHEMA", True)
     client = use_client(monkeypatch, [http_error(400), GOOD])
     with caplog.at_level(logging.WARNING, logger="maneframe.llm"):
-        quips = await llm_module.analyze_window(FRAMES, 0.0, 3.0)
+        quips = (await llm_module.analyze_window(FRAMES, 0.0, 3.0)).quips
     assert len(quips) == 2 and len(client.calls) == 2
     assert "response_format" in client.calls[0] and "response_format" not in client.calls[1]
     assert any("HTTP 400" in r.getMessage() and r.levelno == logging.WARNING for r in caplog.records)

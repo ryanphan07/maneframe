@@ -5,13 +5,14 @@ import os
 import shutil
 import uuid
 
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.services.export import ExportError, render_export
+from app.services import llm as llm_service
 from app.services.jobs import TERMINAL, JobNotFoundError, job_store
 from app.services.pipeline import cleanup_job_files, purge_expired_jobs, run_pipeline, sweep_uploads
 from app.services.video_processor import validate_upload_metadata, sanitize_filename, is_video_corrupt, get_video_duration
@@ -35,6 +36,7 @@ async def _cleanup_loop() -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
+    llm_service.load_system_prompt()  # fail at startup, not on the first window, if a prompt file is missing
     await asyncio.to_thread(sweep_uploads)
     task = asyncio.create_task(_cleanup_loop())
     try:
@@ -68,7 +70,10 @@ async def global_exception_handler(_, exc: Exception):
 
 
 @app.post("/api/upload")
-async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...), style: str = Form(llm_service.DEFAULT_STYLE)):
+    styles = llm_service.list_styles()
+    if style not in styles:
+        raise HTTPException(status_code=400, detail=f"Unknown style. Choose one of: {', '.join(styles)}.")
     purge_expired_jobs()  # kept videos pile up otherwise: job_store.create would drop expired jobs without deleting files
     if job_store.has_active():
         raise HTTPException(status_code=409, detail=BUSY_DETAIL)
@@ -109,12 +114,12 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
             )
         if job_store.has_active():  # another upload finished saving first
             raise HTTPException(status_code=409, detail=BUSY_DETAIL)
-        job_store.create(video_path, job_id=job_id)
+        job_store.create(video_path, job_id=job_id, style=style)
     except BaseException:
         cleanup_job_files(job_id, video_path)
         raise
 
-    background_tasks.add_task(run_pipeline, job_id, video_path)
+    background_tasks.add_task(run_pipeline, job_id, video_path, style)
     return {"job_id": job_id, "filename": safe_name}
 
 
