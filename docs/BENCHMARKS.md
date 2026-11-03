@@ -91,12 +91,18 @@ Notes:
 - Smoke-test labels were deleted afterwards. Models were not changed; the default stays the 9B.
 
 
-## 2026-11-02 23:3x: progressive results, live (session 29)
+## 2026-11-03: Qwen3.6-35B-A3B re-measure, TTS cost (session 31)
 
-Git commit 88b3d6f plus the frontend tests. Clip hoco_40s.mp4, style hype, default settings, Qwen3.6-35B-A3B UD-Q3_K_XL at `-c 8192` (`-np 1 -ngl 99 --jinja`), uvicorn started by hand, job polled every 2 s through `GET /api/jobs` (not `benchmark.py`; the 4 LLM lines carry the job id).
+Git commit 012f23c. Clip hoco_40s.mp4 (40.2 s, 101.7 MB), style hype, default settings, Qwen3.6-35B-A3B UD-Q3_K_XL at `-c 8192` (`-np 1 -ngl 99 --jinja`, llama-server b10679 Vulkan, started by hand), uvicorn started by hand, `benchmark.py` with `--log`. Before the runs no other heavy process was running: top CPU load was 0.8% (the machine had two leftover `find /` searches from earlier sessions, each using a full core; they were stopped first). The model was loaded once and the three runs were back to back, so runs 2 and 3 had the llama-server prompt cache from the earlier runs.
 
-- Total 221.5 s (session 26 35B row: 172.8 s). Windows: 55.6, 49.9, 47.9, 53.5 s (session 26: 45.2, 36.6, 36.8, 35.5), 3451-3603 prompt tokens. One run, so whether the 49 s difference is TTS contention or machine state (e.g. other GPU load) is not established; the windows were each 11-17 s slower.
-- First partial quip with `audio_url` visible at 70.5 s (a third of the total), 8 s after window 1 finished. Window 2 finished at about 115 s, window 3 at 163 s; the job went to `synthesizing` at 219.5 s and completed 2 s later.
-- 5 distinct quips were seen as partials, 7 in the final result; none of the 5 vanished and none lost its audio. The other 2 were not seen as partials (the last poll that showed a partial was before the final window's quips appeared, or they arrived with completion; not checked).
-- 1 TTS failure (NoAudioReceived at t=6.70 after the retry); that quip has no audio in the result.
-- The "Shifting quip from t=25.50 to t=25.57" lines repeat once per later window (4 lines for 2 shifts): every window recomputes the timeline over all quips and logs again.
+| Run | Total s | Analyze s | Window s | Prompt tokens (avg) | Quips (audio) | Shifting / Dropping / TTS failed |
+|---|---|---|---|---|---|---|
+| 1 (cold) | 211.9 | 203.8 | 51.2, 48.9, 49.3, 47.3 | 3588 | 7 (7) | 1 / 0 / 0 |
+| 2 | 165.4 | 157.3 | 15.0, 45.4, 44.3, 46.0 | 3564 | 7 (7) | 1 / 0 / 0 |
+| 3, `TTS_ENABLED=false` | 181.7 | 175.6 | 15.5, 52.8, 48.9, 50.8 | 3571 | 6 (0) | 0 / 0 / n/a |
+
+- All runs: 4 LLM calls for 4 windows, no overlaps. Run 3 ended "Commentary ready (audio unavailable)" with no audio, as intended; there is no synthesizing phase.
+- Window 1 in runs 2 and 3 took 15 s against about 50 s in run 1: the first window's prompt and frames are identical across runs, so llama-server reused its cache. The other windows are not cached.
+- Run 3 (no TTS) was not faster than run 2 (181.7 s against 165.4 s), and its uncached windows were as slow as run 1's (about 49 to 53 s). So TTS is not what slows the windows here; per-call time varies by about 10 s between runs and one run each does not separate that from noise. TTS adds about 2 s after the last window plus the work done in the background while later windows run.
+- Session 26 measured the same model at 172.8 s (38.5 s per window) and session 29 at 221.5 s (about 52 s per window). Today's uncached windows (45 to 53 s) match session 29, not session 26. The cause of the session 26 speed is not established.
+- Run 1 is the figure to quote for a cold start: 211.9 s, about 5.3x real time. Not measured: the 9B on this build, quality of the commentary or audio.

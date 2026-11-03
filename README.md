@@ -2,7 +2,7 @@
 
 Upload a lion dance performance clip and get humorous, time-synced play-by-play commentary, read aloud while the video plays. A local vision LLM watches the footage, edge-tts speaks the lines, and the server schedules them so they never overlap.
 
-Status: v0.1.0, a working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
+Status: v0.1.0 is tagged; changes since are in [`CHANGELOG.md`](CHANGELOG.md) (v0.2.0, not yet tagged). a working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
 
 ![demo](docs/demo.gif)
 
@@ -27,6 +27,11 @@ Key design points:
 - Motion-based crop: wide stage shots are cropped once per video to where the bright, moving performers are, so the model sees them at useful resolution.
 - Windowed analysis: one LLM call per 10 s window, passing the last two quips to avoid repeats.
 - Server-side scheduling: an audio line never starts before the previous one ends plus 0.3 s. It is shifted up to 2 s later, otherwise dropped. Lines without audio are still shown.
+- Styles and continuity: `hype`, `deadpan` or `broadcast` commentary from a dropdown; each window gets the previous quips and a lion dance glossary. Output is schema-constrained (`LLM_JSON_SCHEMA`).
+- Progressive results: audio is synthesized per window, so the finished part of the commentary plays while the rest is still being analyzed.
+- Phone clips: HEVC, unreadable and rotated uploads are converted to upright H.264 first.
+- mp4 export, moment labels (CSV) and an eval script (`backend/scripts/eval_commentary.py`) for judging commentary quality.
+- One command: `start.ps1` starts the model and the app.
 - Honest failure: a window the model fails on (after one retry) is skipped and reported ("skipped n of m parts" with the time ranges), never filled with invented text; if every window fails the job errors. A failed TTS clip only removes that line's audio.
 
 ## Requirements
@@ -103,27 +108,28 @@ To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python s
 ## Tests
 
 ```powershell
-pytest backend/tests -q          # 247 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
+pytest backend/tests -q          # 252 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
 cd frontend; npm test; npm run lint; npm run build
 ```
 Not covered by automated tests: the real model, the real TTS service, browser playback sync (checked by hand, see How it was tested).
 
 ## Benchmarks
 
-Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M via llama-server, default settings, edge-tts 7.3.1. Full data and environment: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M via llama-server (35B row as labeled), default settings, edge-tts 7.3.1. Full data and environment: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 | Clip | Length | Processing | Quips (with audio) | Spoken | Overlaps | Shifted / dropped / TTS failed |
 |---|---|---|---|---|---|---|
 | shorter_test.mp4 | 4.8 s | 66 s | 1 (1) | 3.2 s | 0 | 0 / 0 / 0 |
 | hoco_40s.mp4 | 40.2 s | 189 s | 7 (7) | 28.7 s | 0 | 0 / 0 / 0 |
+| hoco_40s.mp4, Qwen3.6-35B-A3B (2026-11-03, cold) | 40.2 s | 212 s | 7 (7) | 25.9 s | 0 | 1 / 0 / 0 |
 
-The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
+The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Re-measured on 2026-11-03 on an idle machine: 212 s cold (about 49 s per uncached call), 165 s on a repeat that reused the prompt cache for window 1, and 182 s with speech switched off (`TTS_ENABLED=false`), so speech is not what limits the speed. Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
-- 247 backend tests (LLM and edge-tts faked; real tiny videos and a real mp3), 13 frontend tests (Vitest), frontend lint and build.
+- 252 backend tests (LLM and edge-tts faked; real tiny videos and a real mp3), 13 frontend tests (Vitest), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
-- Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, the 35B-A3B model, other machines.
+- Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, other machines.
 
 ## Troubleshooting
 - Progress stops and the page says "Live updates lost": on Windows, selecting text in the backend console window (QuickEdit) pauses the server until you press Enter. Press Enter, or turn QuickEdit off in the console properties.
@@ -135,7 +141,7 @@ The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 202
 ## Known limitations
 - Single user, in-memory jobs, no auth, one job at a time (a second upload gets 409; the LLM server is single-slot). Starting the backend deletes leftover job files (`<job id>_<name>` videos, `<job id>` audio and export folders) in `uploads/`; other files there are left alone.
 - Longest clip measured: 40 s (about 4 min of processing). Longer clips, up to `MAX_VIDEO_SECONDS`, are allowed but untested; a 327 s, 6 GB clip was rejected by the default 2 GB upload limit.
-- Processing is slow on local hardware: 40 s of video took 189 s (about 4.7x real time) on Qwen3.5-9B, 43 s per model call on average (2026-11-02; 251 s and 54 s on 2026-10-28). Skipped windows leave gaps without commentary; jobs are lost on restart. The 35B-A3B (UD-Q3_K_XL, `-c 8192`) measured 173 s for the same clip.
+- Processing is slow on local hardware: 40 s of video took 189 s (about 4.7x real time) on Qwen3.5-9B, 43 s per model call on average (2026-11-02; 251 s and 54 s on 2026-10-28). Skipped windows leave gaps without commentary; jobs are lost on restart. The 35B-A3B (UD-Q3_K_XL, `-c 8192`) measured 173 s on 2026-11-02 and 212 s cold on 2026-11-03 (5.3x real time) for the same clip; the difference between those days is unexplained.
 - Speech needs internet (edge-tts). A transient TTS failure is retried once; if edge-tts stays unreachable the app shows the commentary as text with a notice.
 - `.avi` and some `.mov` files are accepted by the server but may not play in the browser.
 - Runs natively on Windows only; there are no Docker files.
