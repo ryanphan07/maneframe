@@ -35,6 +35,21 @@ function Test-Port($port) {
     try { $client.Connect('127.0.0.1', [int]$port); return $true } catch { return $false } finally { $client.Close() }
 }
 
+# One tiny chat request so the first real window does not pay for loading weights into the GPU. Best effort: a
+# failure is reported and ignored, since the real run will surface any actual model problem.
+function Invoke-Warmup($llmBase, $model, $apiKey) {
+    Write-Host 'Warming up the model...'
+    $body = @{ model = $model; max_tokens = 1; temperature = 0
+               messages = @(@{ role = 'user'; content = 'Say hi.' })
+               chat_template_kwargs = @{ enable_thinking = $false } } | ConvertTo-Json -Depth 6
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        Invoke-RestMethod -Uri "$($llmBase.TrimEnd('/'))/chat/completions" -Method Post -Body $body `
+            -ContentType 'application/json' -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 120 | Out-Null
+        Write-Host ("Model warm ({0:N1} s)." -f $sw.Elapsed.TotalSeconds)
+    } catch { Write-Host "Warm-up request failed (continuing): $($_.Exception.Message)" -ForegroundColor Yellow }
+}
+
 # --- checks ---
 if (-not (Test-Path $python)) {
     Fail 'No venv at backend\venv. Run: cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements.txt'
@@ -100,6 +115,8 @@ try {
         }
         Write-Host 'llama-server is ready.'
     }
+
+    Invoke-Warmup $llmBase (Get-Setting 'LLM_MODEL' 'local') (Get-Setting 'LLM_API_KEY' 'local-key')
 
     # --- backend (serves the API and the built frontend) ---
     $apiLog = Join-Path $logDir 'backend.log'
