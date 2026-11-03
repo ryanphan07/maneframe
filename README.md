@@ -14,7 +14,7 @@ Status: v0.1.0, a working local prototype that is being developed into a tool fo
 Browser (React/Vite)                    FastAPI backend                         Local services
   upload ---------------------------->  POST /api/upload  (validate, save, create job)
   progress <---- WS /ws/analyze/{id} -  background pipeline
-                                          1 extracting    OpenCV: duration, motion crop box
+                                          1 extracting    OpenCV: duration, motion crop box (one sequential pass)
                                           2 analyzing     10 s windows, 6 frames each ------> llama-server
                                                           (image_url parts, JSON quips) <---- (multimodal Qwen, --mmproj)
                                           3 synthesizing  edge-tts per quip --------------> Microsoft edge-tts (internet)
@@ -58,6 +58,7 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `POST /api/upload` (multipart `file`, optional form field `style`) | Validates and saves the clip, starts a job. `style` is one of `hype` (default), `deadpan`, `broadcast`; anything else is a 400. Returns `{job_id, filename}`. 400 `{"detail": ...}` on bad input |
 | `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available, style, ...}` once completed. 404 if unknown |
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
+| `POST /api/jobs/{job_id}/export?captions=1` | Renders the mp4 (same rules and errors as the GET below, errors as JSON) and returns `{"url": "/api/jobs/{id}/export.mp4?captions=1"}`; the web app calls this first, then downloads from the URL so the file is never held in browser memory |
 | `GET /api/jobs/{job_id}/export.mp4?captions=1` | Renders the finished job with ffmpeg and returns an mp4: original audio ducked about 10 dB while a quip plays, quips mixed in at their timestamps, quip text burned in at the bottom when `captions` is 1 (default). Cached per job and captions flag. 409 until completed, 404 if the source video or audio is gone, 500 `{"detail": ...}` if ffmpeg fails |
 | `GET /uploads/audio/{job_id}/{file}.mp3` | Generated speech clips. Raw videos are never served |
 

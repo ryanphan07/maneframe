@@ -6,18 +6,18 @@ What exists today. Verified means checked by a test or by a run; untested means 
 
 ```
 upload -> validate + save -> job created -> background pipeline:
-  extracting   duration, motion crop box (once per video)
+  extracting   duration, motion crop box (once per video, 30 frames read in one forward pass)
   analyzing    per 10 s window: sample frames -> vision LLM -> quips (sequential)
   synthesizing finalize timeline -> edge-tts per quip (bounded concurrency) -> measure durations -> schedule
   completed    GET /api/jobs/{id} returns quips + audio_available
 ```
-The browser keeps the file as a blob URL for playback; the server never serves raw videos, only rendered exports.
+The browser keeps the file as a blob URL for playback (the original file, not the transcoded copy); the server never serves raw videos, only rendered exports.
 
 ## Backend (`backend/app/`)
 
 | File | What it does | Status |
 |---|---|---|
-| `main.py` | FastAPI app, CORS, `POST /api/upload`, `GET /api/jobs/{id}`, `GET /api/jobs/{id}/export.mp4`, `WS /ws/analyze/{job_id}`, audio-only static mount, generic 500 handler, periodic job cleanup | Route tests (LLM/TTS faked); upload and ws exercised by hand |
+| `main.py` | FastAPI app, CORS, `POST /api/upload`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/export` (renders, returns the download URL), `GET /api/jobs/{id}/export.mp4`, `WS /ws/analyze/{job_id}`, audio-only static mount, generic 500 handler, periodic job cleanup | Route tests (LLM/TTS faked); upload and ws exercised by hand |
 | `config.py` | Single `settings` object, `.env` resolved relative to the file. Full list in `backend/.env.example` | Verified |
 | `services/jobs.py` | In-memory `JobStore`: status/progress monotonic, terminal states sticky, subscriber queues, TTL purge, pipeline task handles (a stale job's task is cancelled) | Verified (12 tests) |
 | `services/pipeline.py` | Background runner; failure marks job `error` with a generic message and deletes the job's files | Verified |
@@ -25,7 +25,8 @@ The browser keeps the file as a blob URL for playback; the server never serves r
 | `services/llm.py` | `analyze_window` (returns `WindowResult{quips, seen}`): system prompt + earlier context (last 2 `seen` summaries, recent quips, "do not repeat") + `image_url` parts, `<think>` and fence stripping, tolerant parse of every top-level JSON object (`raw_decode`; first with a `quips` list, else bare quip objects), `LLM_JSON_SCHEMA` constrained output (default on), one retry with a JSON nudge, one retry without `response_format` on HTTP 400 while the schema is on (warning logged), full unusable reply logged (2000 chars), token/time logging. No canned fallback: failures raise | Verified live (one window, Qwen3.5-9B, 44.7 s for 6 frames / 3248 prompt tokens) |
 | `services/commentary.py` | Window loop, `finalize_timeline` (sort, clamp, round to 2 decimals, `MIN_QUIP_GAP_SEC`; text is never cut), TTS fan-out, `schedule_quips`, `audio_available` | Verified live before the F1-F3 fixes; re-verify live |
 | `services/tts.py` | edge-tts with `TTS_VOICE`/`TTS_RATE`, per-clip `TTS_TIMEOUT_SECONDS`, one retry for transient errors incl. NoAudioReceived, failure diagnostics in the log, duration re-measured once after 0.2 s; clips run one at a time (`TTS_CONCURRENCY=1`, 0.3 s start stagger, in commentary.py); any failure deletes partial files and returns None; durations via mutagen (unreadable duration counts as failure) | Verified live with edge-tts 7.3.1 |
-| `services/export.py` | mp4 export: pure builders (`build_ffmpeg_args`, `build_ass`, `duck_intervals`, `caption_spans`) plus `render_export` (async subprocess, cwd = `uploads/exports/<job id>/`, relative subtitle name, `.partial.mp4` then rename, cached per job + captions flag, per-key lock, killed on timeout or cancel). Original audio ducked -10 dB while quips play (near quips merged), quips via `adelay` + `amix`, H.264 crf 23 + AAC, even dimensions, no-audio quips captioned for 3 s. ffmpeg from `FFMPEG_PATH` or imageio-ffmpeg | Real render verified on a tiny video (size, codecs, burned captions, ducking level measured); not run on a real clip |
+| `services/transcode.py` | At upload (before the corruption check): ffmpeg probe; a clip that is HEVC or another codec outside {h264, mpeg4, mjpeg, mpeg2video, vp8}, has rotation metadata, or that OpenCV cannot decode is transcoded in place to upright H.264 (crf 20, AAC, even dimensions). No ffmpeg: skipped. Failure: 400 | Tested on tiny ffmpeg-generated clips (rotated 90 degrees, HEVC, route); no real phone clip |
+| `services/export.py` | mp4 export: pure builders (`build_filter_graph`, `build_ffmpeg_args`, `build_ass`, `duck_intervals`, `caption_spans`) plus `render_export` (async subprocess, cwd = `uploads/exports/<job id>/`, relative subtitle name, graph in `filter_graph.txt` via `-filter_complex_script`, quip audio as paths relative to that folder (300 quips verified), `.partial.mp4` then rename, cached per job + captions flag, per-key lock, killed on timeout or cancel). Original audio ducked -10 dB while quips play (near quips merged), quips via `adelay` + `amix`, H.264 crf 23 + AAC, even dimensions, no-audio quips captioned for 3 s. ffmpeg from `FFMPEG_PATH` or imageio-ffmpeg | Real render verified on a tiny video (size, codecs, burned captions, ducking level measured); not run on a real clip |
 | `schemas/events.py` | `CommentaryQuip{timestamp,text,audio_url,duration_sec}`, `CommentaryResponse{quips,skipped,total_windows,video_url,audio_available,style}` | Verified |
 | `prompts/commentary_system.txt` | Announcer prompt; `MAX_QUIPS` replaced at load; cached per process (restart after editing) | Works with the 9B model; quality on real motion not judged |
 | `prompts/lion_dance_glossary.txt`, `examples.txt`, `styles/{hype,deadpan,broadcast}.txt` | Glossary (about 16 terms, DRAFT: owner to review) and style text are appended to the system prompt by `llm.load_system_prompt(style)`; `examples.txt` holds only a format comment and is added once it has real examples. Loaded and checked at startup | Prompt building tested; effect on commentary quality not yet judged (no live model this session) |
@@ -47,8 +48,8 @@ The browser keeps the file as a blob URL for playback; the server never serves r
 - A style dropdown (Hype, Deadpan, Broadcast; hardcoded list that must match `prompts/styles/`) sits next to the file picker and is sent as the `style` form field. Not browser-tested.
 - Lint and build pass. No frontend tests.
 
-## Tests: 182 passing (`pytest backend/tests -q`)
-- `test_jobs.py` JobStore. `test_api.py` upload, job GET, WebSocket, cleanup, videos not served, validators. `test_commentary.py` orchestration with LLM/TTS faked. `test_vision.py` crop, windows, frame sampling on real tiny videos, prompt/message building, parser, finalize, window failure. `test_export.py` ffmpeg argument/ASS builders, export endpoint, one real render (skipped without ffmpeg). `test_prompts.py` prompt assembly, styles, continuity; `test_eval.py` eval summarize. `test_audio.py` TTS success/failure/timeout/no leftover files, mutagen on a hand-built mp3, `schedule_quips`, `audio_available`, parser edge cases.
+## Tests: 195 passing (`pytest backend/tests -q`)
+- `test_jobs.py` JobStore. `test_api.py` upload, job GET, WebSocket, cleanup, videos not served, validators. `test_commentary.py` orchestration with LLM/TTS faked. `test_vision.py` crop, windows, frame sampling on real tiny videos, prompt/message building, parser, finalize, window failure. `test_export.py` ffmpeg argument/ASS builders, export endpoints, real renders incl. 300 quips (skipped without ffmpeg). `test_transcode.py` probe parsing, rotated/HEVC/failed transcodes, upload route. `test_prompts.py` prompt assembly, styles, continuity; `test_eval.py` eval summarize. `test_audio.py` TTS success/failure/timeout/no leftover files, mutagen on a hand-built mp3, `schedule_quips`, `audio_available`, parser edge cases.
 - Not covered: real LLM or real edge-tts in CI (both need external services), real `motion_box` on moving-subject video, frontend.
 
 ## Environment
