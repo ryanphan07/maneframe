@@ -12,7 +12,7 @@ Status: v0.1.0, a working local prototype that is being developed into a tool fo
 
 ```
 Browser (React/Vite)                    FastAPI backend                         Local services
-  upload ---------------------------->  POST /api/upload  (validate, save, create job)
+  upload ---------------------------->  POST /api/upload  (check name and size, save, create job)
   progress <---- WS /ws/analyze/{id} -  background pipeline
                                           1 extracting    OpenCV: duration, motion crop box (one sequential pass)
                                           2 analyzing     10 s windows, 6 frames each ------> llama-server
@@ -55,7 +55,8 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 
 | Route | Purpose |
 |---|---|
-| `POST /api/upload` (multipart `file`, optional form field `style`) | Validates and saves the clip, starts a job. `style` is one of `hype` (default), `deadpan`, `broadcast`; anything else is a 400. Returns `{job_id, filename}`. 400 `{"detail": ...}` on bad input |
+| `GET /api/styles` | `{styles: [...], default}`: the files in `prompts/styles/` (the values `style` accepts) |
+| `POST /api/upload` (multipart `file`, optional form field `style`) | Checks the name, extension and size, saves the clip and starts a job; returns `{job_id, filename}` without reading the video. `style` must be one of `GET /api/styles`, else 400. 400 `{"detail": ...}` on bad input. Conversion to upright H.264 (when needed), the corruption check and the length limit are the job's first step (status `extracting`, message `Converting video`); a clip that fails them ends the job in `error` with the reason |
 | `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available, style, ...}` once completed. 404 if unknown |
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
 | `POST /api/jobs/{job_id}/export?captions=1` | Renders the mp4 (same rules and errors as the GET below, errors as JSON) and returns `{"url": "/api/jobs/{id}/export.mp4?captions=1"}`; the web app calls this first, then downloads from the URL so the file is never held in browser memory |
@@ -64,7 +65,9 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `POST /api/jobs/{job_id}/labels` | Body `{t, label, quality, note?}`; returns the new label with 201. 400 `{"detail"}` if `t` is outside 0 to the video duration, the label or quality is not in the lists, or the note is over 500 characters; 422 on a malformed body |
 | `DELETE /api/jobs/{job_id}/labels/{id}` | 204; 404 if the label is unknown |
 | `GET /api/jobs/{job_id}/labels.csv` | The labels as a CSV download (`id,t,label,quality,note,created_at`; notes starting with `=`, `+`, `-` or `@` get a leading `'`) |
-| `GET /uploads/audio/{job_id}/{file}.mp3` | Generated speech clips. Raw videos are never served |
+| `GET /api/labels.csv` | Every labeled video in one CSV (`hash,filename,id,t,label,quality,note,created_at`), no live job needed. Each label file in `data/labels/` also stores the video's original (sanitized) filename and duration |
+| `GET /api/jobs/{job_id}/video` | The job's prepared copy of the video (converted to H.264 when the upload needed it) with HTTP Range support; the player switches to it when the browser cannot decode the local file. 409 until the conversion step is done, 404 if the job or file is gone |
+| `GET /uploads/audio/{job_id}/{file}.mp3` | Generated speech clips. Upload paths are never served |
 
 ## Configuration (`backend/.env`, see `backend/.env.example`)
 
@@ -88,7 +91,7 @@ To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python s
 ## Tests
 
 ```powershell
-pytest backend/tests -q          # 215 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
+pytest backend/tests -q          # 229 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
 cd frontend; npm run lint; npm run build
 ```
 Not covered by automated tests: the real model, the real TTS service, browser playback sync (checked by hand, see How it was tested).
@@ -105,7 +108,7 @@ Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M vi
 The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
-- 215 automated tests (LLM and edge-tts faked; real tiny videos and a real mp3), frontend lint and build.
+- 229 automated tests (LLM and edge-tts faked; real tiny videos and a real mp3), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
 - Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, the 35B-A3B model, other machines.

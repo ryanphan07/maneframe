@@ -18,15 +18,15 @@ The goal is a better product for real users: lion dance teams turning performanc
 - mp4 export (done, session 21): the video with the commentary audio mixed in and optional burned-in captions; `GET /api/jobs/{id}/export.mp4`. Follow-ups: try it on a real clip, progress for long renders, output size options.
 - Commentary quality (groundwork done, session 22): glossary (DRAFT, needs owner review), `seen` continuity across windows, styles (hype, deadpan, broadcast) and `scripts/eval_commentary.py`. Still to do: fill `examples.txt` with real few-shot examples, run the eval on a live model and compare prompts, models and styles, tune the style texts from the ratings.
 
-- Labeling tool (done, session 25): moment labels in the player, stored by video hash in `data/labels/`, CSV download. Follow-ups: use the labels as eval ground truth in `scripts/eval_commentary.py`; a way to reach labels after the job expires (routes need the live job).
+- Labeling tool (done, session 25): moment labels in the player, stored by video hash in `data/labels/`, CSV download. Session 27: `GET /api/labels.csv` exports all labeled videos without a live job; label files keep the filename and duration. Follow-up: use the labels as eval ground truth in `scripts/eval_commentary.py`.
 
 ## Phase 2: speed and robustness
 - 9B vs 35B-A3B throughput table (`FRAME_WIDTH` 640, `FRAMES_PER_WINDOW` 4, `WINDOW_SECONDS` 20, optionally `llama-server -np 2`).
-- Sequential crop sampling (done, session 23): the crop-box probe reads its 30 frames in one forward pass; 5.9 s to 1.8 s on hoco_40s.mp4. `sample_window_frames` (4 frames per window) still seeks.
+- Sequential crop sampling (done, session 23): the crop-box probe reads its 30 frames in one forward pass; 5.9 s to 1.8 s on hoco_40s.mp4. `sample_window_frames` (done, session 27) seeks once per window and reads forward: identical frames on hoco_40s.mp4 (24 frames), extraction 9.7 s to 5.3 s.
 - Progressive results (D4 option C).
-- Phone clips (done, session 23): HEVC, other codecs OpenCV may not decode and clips with rotation metadata are transcoded to upright H.264 at upload. Untested on a real phone clip. Still open: the browser plays the uploaded file as is, so it cannot show a format it does not support (see the warning item below).
+- Phone clips (done, session 23): HEVC, other codecs OpenCV may not decode and clips with rotation metadata are transcoded to upright H.264 (session 27: as the job's first step, not in the upload request). Untested on a real phone clip. The player falls back to `GET /api/jobs/{id}/video` when the browser cannot decode the local file (session 27); untested with a real HEVC clip in a browser.
 - Export hardening (done, session 23): filter graph via `-filter_complex_script`, quip inputs as relative paths (300 quips tested), and the browser no longer buffers the mp4 (`POST /api/jobs/{id}/export` renders, then the download is a plain link).
-- Smaller items: warn in the UI when the browser cannot play the format; Vitest tests for the VideoPlayer queue; show dropped quips as skipped; keep the volume setting while a clip ducks the video; offline TTS provider behind `TTS_PROVIDER` (D3).
+- Smaller items: Vitest tests for the VideoPlayer queue; show dropped quips as skipped; keep the volume setting while a clip ducks the video; offline TTS provider behind `TTS_PROVIDER` (D3).
 
 ## Phase 3: distribution (undecided)
 Local packaging versus a hosted service.

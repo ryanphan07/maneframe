@@ -5,13 +5,13 @@ What exists today. Verified means checked by a test or by a run; untested means 
 ## Flow
 
 ```
-upload -> validate + save -> job created -> background pipeline:
-  extracting   duration, motion crop box (once per video, 30 frames read in one forward pass)
+upload -> check name and size, save -> job created -> background pipeline:
+  extracting   convert if needed (Converting video), corruption and length checks, duration, motion crop box (once per video, 30 frames read in one forward pass)
   analyzing    per 10 s window: sample frames -> vision LLM -> quips (sequential)
   synthesizing finalize timeline -> edge-tts per quip (bounded concurrency) -> measure durations -> schedule
   completed    GET /api/jobs/{id} returns quips + audio_available
 ```
-The browser keeps the file as a blob URL for playback (the original file, not the transcoded copy); the server never serves raw videos, only rendered exports.
+The browser plays the file as a blob URL (the original, not the transcoded copy). If the browser cannot decode it, the player switches to `GET /api/jobs/{id}/video`, the server's prepared H.264 copy (Range supported; untested in a real browser with an HEVC clip). Upload paths are never served; exports only through the export route.
 
 ## Backend (`backend/app/`)
 
@@ -25,7 +25,7 @@ The browser keeps the file as a blob URL for playback (the original file, not th
 | `services/llm.py` | `analyze_window` (returns `WindowResult{quips, seen}`): system prompt + earlier context (last 2 `seen` summaries, recent quips, "do not repeat") + `image_url` parts, `<think>` and fence stripping, tolerant parse of every top-level JSON object (`raw_decode`; first with a `quips` list, else bare quip objects), `LLM_JSON_SCHEMA` constrained output (default on), one retry with a JSON nudge, one retry without `response_format` on HTTP 400 while the schema is on (warning logged), full unusable reply logged (2000 chars), token/time logging. No canned fallback: failures raise | Verified live (one window, Qwen3.5-9B, 44.7 s for 6 frames / 3248 prompt tokens) |
 | `services/commentary.py` | Window loop, `finalize_timeline` (sort, clamp, round to 2 decimals, `MIN_QUIP_GAP_SEC`; text is never cut), TTS fan-out, `schedule_quips`, `audio_available` | Verified live before the F1-F3 fixes; re-verify live |
 | `services/tts.py` | edge-tts with `TTS_VOICE`/`TTS_RATE`, per-clip `TTS_TIMEOUT_SECONDS`, one retry for transient errors incl. NoAudioReceived, failure diagnostics in the log, duration re-measured once after 0.2 s; clips run one at a time (`TTS_CONCURRENCY=1`, 0.3 s start stagger, in commentary.py); any failure deletes partial files and returns None; durations via mutagen (unreadable duration counts as failure) | Verified live with edge-tts 7.3.1 |
-| `services/transcode.py` | At upload (before the corruption check): ffmpeg probe; a clip that is HEVC or another codec outside {h264, mpeg4, mjpeg, mpeg2video, vp8}, has rotation metadata, or that OpenCV cannot decode is transcoded in place to upright H.264 (crf 20, AAC, even dimensions). No ffmpeg: skipped. Failure: 400 | Tested on tiny ffmpeg-generated clips (rotated 90 degrees, HEVC, route); no real phone clip |
+| `services/transcode.py` | As the job's first step (`pipeline.prepare_video`, status extracting, message Converting video, before the corruption and length checks): ffmpeg probe; a clip that is HEVC or another codec outside {h264, mpeg4, mjpeg, mpeg2video, vp8}, has rotation metadata, or that OpenCV cannot decode is transcoded in place to upright H.264 (crf 20, AAC, even dimensions). No ffmpeg: skipped. Failure: the job ends in `error` | Tested on tiny ffmpeg-generated clips (rotated 90 degrees, HEVC, route); no real phone clip |
 | `services/labels.py` | Moment labels: glossary terms (parsed from `lion_dance_glossary.txt`) plus `other`, quality good / needs work / none, validation, atomic JSON write per video SHA-256 in `LABELS_DIR` (`data/labels/`), formula-safe CSV | 11 route tests (round trip, validation, expiry and re-upload keep labels, CSV); not used in a browser yet |
 | `services/export.py` | mp4 export: pure builders (`build_filter_graph`, `build_ffmpeg_args`, `build_ass`, `duck_intervals`, `caption_spans`) plus `render_export` (async subprocess, cwd = `uploads/exports/<job id>/`, relative subtitle name, graph in `filter_graph.txt` via `-filter_complex_script`, quip audio as paths relative to that folder (300 quips verified), `.partial.mp4` then rename, cached per job + captions flag, per-key lock, killed on timeout or cancel). Original audio ducked -10 dB while quips play (near quips merged), quips via `adelay` + `amix`, H.264 crf 23 + AAC, even dimensions, no-audio quips captioned for 3 s. ffmpeg from `FFMPEG_PATH` or imageio-ffmpeg | Real render verified on a tiny video (size, codecs, burned captions, ducking level measured); not run on a real clip |
 | `schemas/events.py` | `CommentaryQuip{timestamp,text,audio_url,duration_sec}`, `CommentaryResponse{quips,skipped,total_windows,video_url,audio_available,style}` | Verified |
@@ -50,7 +50,7 @@ The browser keeps the file as a blob URL for playback (the original file, not th
 - `components/LabelPanel.jsx` (under the commentary once completed): "Add label at current time" pauses the video and opens a form (label, quality, note); the list seeks on click, has Delete and a "Download CSV" link. Lint and build pass; not browser-tested.
 - Lint and build pass. No frontend tests.
 
-## Tests: 215 passing (`pytest backend/tests -q`)
+## Tests: 229 passing (`pytest backend/tests -q`)
 - `test_jobs.py` JobStore. `test_api.py` upload, job GET, WebSocket, cleanup, videos not served, validators. `test_commentary.py` orchestration with LLM/TTS faked. `test_vision.py` crop, windows, frame sampling on real tiny videos, prompt/message building, parser, finalize, window failure. `test_export.py` ffmpeg argument/ASS builders, export endpoints, real renders incl. 300 quips (skipped without ffmpeg). `test_transcode.py` probe parsing, rotated/HEVC/failed transcodes, upload route. `test_prompts.py` prompt assembly, styles, continuity; `test_eval.py` eval summarize. `test_labels.py` label routes, validation, persistence by video hash, CSV. `test_audio.py` TTS success/failure/timeout/no leftover files, mutagen on a hand-built mp3, `schedule_quips`, `audio_available`, parser edge cases.
 - Not covered: real LLM or real edge-tts in CI (both need external services), real `motion_box` on moving-subject video, frontend.
 

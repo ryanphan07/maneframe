@@ -13,12 +13,12 @@ Goal: a better product for real users: lion dance teams turning performance clip
 - The system prompt is built by `llm.load_system_prompt(style)` from `backend/app/prompts/commentary_system.txt` (`MAX_QUIPS` is replaced by MAX_QUIPS_PER_WINDOW at load), `lion_dance_glossary.txt` (a leading `DRAFT` line is dropped), `examples.txt` (only if it has non-`#` lines) and `styles/<style>.txt`; the files are read once per process and checked at startup. Each window's user message carries the last 2 windows' `seen` summaries and recent quips as earlier context. `scripts/eval_commentary.py` compares prompts and styles (eval/clips.txt and eval/results/ are git-ignored). The LLM step never falls back to canned text: a window that fails after one retry is skipped and reported (DECISIONS D4); a job where every window fails ends in `error`.
 - TTS: edge-tts (needs internet). Failures yield no audio (`audio_url` null), never placeholder files. Settings: TTS_VOICE, TTS_RATE, TTS_TIMEOUT_SECONDS, TTS_CONCURRENCY (1), TTS_START_STAGGER_SECONDS (0.3), TTS_RETRIES, TTS_RETRY_DELAY_SECONDS, MAX_SHIFT_SEC. Retried once: timeouts, connection errors, 5xx, edge-tts NoAudioReceived/WebSocketError; never 401/403. `backend/scripts/tts_check.py` smoke-tests the TTS path.
 - mp4 export uses ffmpeg: `FFMPEG_PATH` if set, else the binary bundled with `imageio-ffmpeg` (requirements.txt). Exports are rendered on demand into `uploads/exports/<job id>/`; the ffmpeg command is built by pure functions in `services/export.py`. The filter graph is passed with `-filter_complex_script` (file `filter_graph.txt` in that folder) and quip audio as relative paths, to stay under the Windows command-line limit. The subtitles filter gets a relative file name and ffmpeg runs with that folder as cwd (no Windows path escaping).
-- Uploads that are HEVC, otherwise undecodable by OpenCV or carry rotation metadata are transcoded in place to upright H.264 by `services/transcode.py` (needs ffmpeg; skipped without it).
+- Uploads that are HEVC, otherwise undecodable by OpenCV or carry rotation metadata are transcoded in place to upright H.264 by `services/transcode.py` (needs ffmpeg; skipped without it). This is the job's first step (`pipeline.prepare_video`: status `extracting`, message `Converting video`), not part of the upload request; the corruption and length checks follow it, and a rejected clip ends the job in `error` with a user-safe `VideoRejected` message.
 - All settings come from the single shared `settings` object in `backend/app/config.py`. No hardcoded URLs or paths elsewhere.
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (215) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (229) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
@@ -34,7 +34,8 @@ Run from the repo root in PowerShell unless noted. Tests (215) verified 2026-11-
 - No pasted chat text, citation markers, or meta commentary in docs.
 
 ## API & WebSocket Contract
-- `POST /api/upload` (multipart `file`, optional form field `style`: `hype` default, `deadpan`, `broadcast`; the allowed values are the files in `prompts/styles/`, anything else is a 400) returns JSON including `job_id`. The job runs in the background. The style is stored on the job and returned as `result.style`.
+- `GET /api/styles` returns `{styles, default}`: the files in `prompts/styles/`, which the frontend dropdown uses.
+- `POST /api/upload` (multipart `file`, optional form field `style`: `hype` default, `deadpan`, `broadcast`; the allowed values are the files in `prompts/styles/`, anything else is a 400) checks name, extension and size, stores the file and returns JSON including `job_id` without reading the video. The job runs in the background. The style is stored on the job and returned as `result.style`.
 - `WS /ws/analyze/{job_id}` is server-to-client only. Every message is:
   ```json
   {
@@ -47,7 +48,8 @@ Run from the repo root in PowerShell unless noted. Tests (215) verified 2026-11-
 - The `completed` message carries no result. Fetch it from `GET /api/jobs/{job_id}`, which returns `{job_id, status, progress, message, result}`.
 - Frontend listeners switch on `msg.status` only (never `msg.phase`, never fall back to `msg.message`).
 - `POST /api/jobs/{job_id}/export?captions=1|0` renders the mp4 and returns `{"url"}` for `GET /api/jobs/{job_id}/export.mp4`; errors are JSON `{"detail"}`.
-- `GET|POST /api/jobs/{job_id}/labels`, `DELETE /api/jobs/{job_id}/labels/{id}` and `GET /api/jobs/{job_id}/labels.csv` manage moment labels (`{id, t, label, quality, note, created_at}`) for eval and training data; see README for the full shapes. Labels are stored in `LABELS_DIR` (`data/labels/<sha256 of the video>.json`, git-ignored), keyed by content hash so they outlive the job; the routes need the job and its kept video, so they 404 once the job expires. `t` must lie within the video duration.
+- `GET /api/jobs/{job_id}/video`: the job's prepared video (see Backend Rules), Range supported; 409 until the conversion step is done.
+- `GET|POST /api/jobs/{job_id}/labels`, `DELETE /api/jobs/{job_id}/labels/{id}` and `GET /api/jobs/{job_id}/labels.csv` manage moment labels (`{id, t, label, quality, note, created_at}`) for eval and training data; see README for the full shapes. Labels are stored in `LABELS_DIR` (`data/labels/<sha256 of the video>.json`, git-ignored; `{filename, duration, labels}`, older files were a bare list), keyed by content hash so they outlive the job; the per-job routes need the job and its kept video, so they 404 once the job expires (409 while it is still being prepared). `GET /api/labels.csv` exports all labeled videos (`hash,filename,` then the label fields) without a job. The duration is measured once, in `prepare_video`, and kept on the job. `t` must lie within the video duration.
 - HTTP errors: `HTTPException` with `{"detail": "<clear message>"}`.
 
 ## Canonical Processing Phases
