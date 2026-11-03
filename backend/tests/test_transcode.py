@@ -233,3 +233,46 @@ async def test_conversion_progress_counts_as_job_activity(tmp_path, monkeypatch)
     assert job.message == "Converting video 40%" and job.status == "extracting"
     assert job_store.has_active()
     assert job.status == "extracting"  # not failed as stale
+
+
+# ---- video filter: frame rate, size and HDR ------------------------------------------------------
+
+HDR_PROBE = ("  Stream #0:0[0x1](und): Video: hevc (Main 10) (hvc1 / 0x31637668), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), "
+             "3840x2160, 147287 kb/s, 119.94 fps, 120 tbr, 2400 tbn (default)")
+SDR_PROBE = "  Stream #0:0: Video: hevc (Main), yuv420p(tv, bt709), 1920x1080, 20000 kb/s, 30 fps, 30 tbr, 90k tbn"
+
+
+def test_probe_text_gives_frame_rate_and_hdr():
+    assert transcode.parse_fps(HDR_PROBE) == 119.94 and transcode.is_hdr(HDR_PROBE)
+    assert transcode.parse_fps(SDR_PROBE) == 30 and not transcode.is_hdr(SDR_PROBE)
+    assert transcode.is_hdr(SDR_PROBE.replace("bt709", "bt2020nc/bt2020/smpte2084"))
+    assert transcode.parse_fps("no stream here") is None
+
+
+def test_filter_caps_fps_and_size_and_tonemaps_hdr_only():
+    hdr = transcode.build_video_filter(119.94, True)
+    assert hdr.startswith("fps=30,scale=") and "tonemap=hable" in hdr and hdr.endswith("format=yuv420p")
+    assert "min(iw,1920)" in hdr and "min(ih,1920)" in hdr
+    sdr = transcode.build_video_filter(30.0, False)
+    assert "fps=" not in sdr and "tonemap" not in sdr  # at or below the cap: frame rate untouched
+    assert "fps=" not in transcode.build_video_filter(None, False)
+
+
+def test_filter_uses_the_settings(monkeypatch):
+    monkeypatch.setattr(transcode.settings, "TRANSCODE_MAX_SIDE", 1280)
+    monkeypatch.setattr(transcode.settings, "TRANSCODE_MAX_FPS", 24.0)
+    f = transcode.build_video_filter(60.0, False)
+    assert f.startswith("fps=24,") and "min(iw,1280)" in f
+
+
+def test_high_fps_hdr_clip_is_converted_to_capped_sdr(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcode.settings, "TRANSCODE_MAX_SIDE", 128)
+    path = tmp_path / "hdr.mov"
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=size=256x144:rate=60:duration=2", "-vf", "format=yuv420p10le",
+           "-c:v", "libx265", "-x265-params", "log-level=none:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+           "-pix_fmt", "yuv420p10le", str(path))
+    assert transcode.is_hdr(probe(path)), "test clip should be tagged HLG"
+    assert asyncio.run(transcode.normalize_video(str(path), opencv_can_read=True)) is True
+    out = probe(path)
+    assert "h264" in out and "bt709" in out and not transcode.is_hdr(out)
+    assert "128x72" in out and "30 fps" in out

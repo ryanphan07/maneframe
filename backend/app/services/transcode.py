@@ -29,6 +29,39 @@ def parse_probe(stderr: str) -> Tuple[Optional[str], int]:
     return (codec_match.group(1).lower() if codec_match else None), rotation
 
 
+def parse_fps(stderr: str) -> Optional[float]:
+    """Frame rate of the first video stream from the `119.94 fps` in the text `ffmpeg -i` prints."""
+    match = re.search(r"Stream #\d+:\d+.*?: Video:.*?, (\d+(?:\.\d+)?) fps", stderr)
+    return float(match.group(1)) if match else None
+
+
+def is_hdr(stderr: str) -> bool:
+    """True for HLG (arib-std-b67) or PQ (smpte2084) video, which phones record in HDR mode."""
+    return re.search(r"Stream #\d+:\d+.*?: Video:.*?(arib-std-b67|smpte2084)", stderr) is not None
+
+
+def build_video_filter(fps: Optional[float], hdr: bool) -> str:
+    """The -vf chain: frame rate capped at TRANSCODE_MAX_FPS, long side capped at TRANSCODE_MAX_SIDE (even sizes),
+    and HDR tone-mapped to SDR BT.709, so a 4K 120 fps HDR phone clip becomes a 1080p 30 fps SDR clip that converts in
+    reasonable time and does not look washed out. Commentary and the exported mp4 both use this converted copy."""
+    side = int(settings.TRANSCODE_MAX_SIDE)
+    chain = []
+    if fps is not None and fps > settings.TRANSCODE_MAX_FPS + 0.5:
+        chain.append(f"fps={_fmt(settings.TRANSCODE_MAX_FPS)}")
+    chain.append(f"scale=w='if(gt(iw,ih),min(iw,{side}),-2)':h='if(gt(iw,ih),-2,min(ih,{side}))'")
+    if hdr:
+        chain.append(
+            "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,"
+            "zscale=t=bt709:m=bt709:r=tv"
+        )
+    chain.append("format=yuv420p")
+    return ",".join(chain)
+
+
+def _fmt(value: float) -> str:
+    return f"{value:g}"
+
+
 def parse_duration(stderr: str) -> Optional[float]:
     """Container duration in seconds from the `Duration: 00:00:40.04` line `ffmpeg -i` prints, if it has one."""
     match = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", stderr)
@@ -90,8 +123,9 @@ async def normalize_video(video_path: str, opencv_can_read: bool, on_progress: O
     args = [
         ffmpeg, "-hide_banner", "-nostdin", "-y", "-progress", progress_file, "-stats_period", "1", "-i", name,
         "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-vf", build_video_filter(parse_fps(probe), is_hdr(probe)),
         "-c:v", "libx264", "-crf", str(TRANSCODE_CRF), "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-f", "mp4", partial,
     ]
     watcher = None
