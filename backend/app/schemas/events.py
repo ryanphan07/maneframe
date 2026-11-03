@@ -21,3 +21,11 @@ class CommentaryResponse(BaseModel):
     video_url: Optional[str] = None
     audio_available: bool = False
     style: Optional[str] = None
+
+
+class CommentaryPartial(BaseModel):
+    """Quips finished so far while a job is still running. Never a final result."""
+    quips: List[CommentaryQuip]
+    windows_done: int = 0
+    total_windows: int = 0
+    ready_until: float = 0.0  # end time (s) of the last window handled

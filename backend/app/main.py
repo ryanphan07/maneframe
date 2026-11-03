@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 import uuid
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -121,6 +121,15 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
     return {"job_id": job_id, "filename": safe_name}
 
 
+def job_result(job) -> Optional[dict]:
+    """The final result, or while the job runs {"partial": ...}; never both."""
+    if job.result:
+        return job.result.model_dump()
+    if job.partial and job.status not in TERMINAL:
+        return {"partial": job.partial.model_dump()}
+    return None
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job(job_id: str):
     try:
@@ -132,7 +141,7 @@ async def get_job(job_id: str):
         "status": job.status,
         "progress": job.progress,
         "message": job.message,
-        "result": job.result.model_dump() if job.result else None,
+        "result": job_result(job),
     }
 
 

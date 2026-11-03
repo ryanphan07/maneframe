@@ -136,7 +136,9 @@ async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE)
     try:
         prepared = await prepare_video(video_path, progress_cb)
         job_store.set_video(job_id, prepared.duration, prepared.media_type)
-        result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb, style=style)
+        result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb, style=style,
+            partial_cb=lambda partial: job_store.set_partial(job_id, partial),
+        )
         job_store.complete(job_id, result)  # the source video stays until the job expires, for mp4 export
     except asyncio.CancelledError:
         logger.warning("Pipeline for job %s was cancelled", job_id)

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from app.config import settings
-from app.schemas.events import CommentaryQuip, CommentaryResponse, SkippedRange
+from app.schemas.events import CommentaryPartial, CommentaryQuip, CommentaryResponse, SkippedRange
 from app.services import llm as llm_service
 from app.services import tts as tts_service
 from app.services import video_processor as video_processor_service
@@ -126,6 +126,7 @@ async def process_video_commentary(
     job_id: Optional[str] = None,
     progress_cb: Optional[Callable[[str, int, Optional[str]], Awaitable[None]]] = None,
     style: str = llm_service.DEFAULT_STYLE,
+    partial_cb: Optional[Callable[[CommentaryPartial], None]] = None,
 ) -> CommentaryResponse:
     video_id = job_id or "default"
     started = time.monotonic()
@@ -151,39 +152,8 @@ async def process_video_commentary(
     skipped: List[SkippedRange] = []
     consecutive_skips = 0
     total_windows = len(windows)
-    analyzing_started = time.monotonic()
-    for i, (start, end) in enumerate(windows):
-        avg = (time.monotonic() - analyzing_started) / i if i else None
-        await _report("analyzing", 20 + int(45 * i / total_windows), analyzing_message(i, total_windows, avg))
-        label = f"window {i + 1}/{total_windows}"
-        try:
-            result = await analyze_window_with_retry(video_path, start, end, box, context, label, style)
-        except Exception as exc:
-            if is_unreachable(exc):
-                logger.error("%s: the model server is unreachable; failing the job instead of skipping", label)
-                raise
-            logger.exception("%s (%.1fs-%.1fs) failed, skipping it", label, start, end)
-            skipped.append(SkippedRange(start=round(start, 2), end=round(end, 2)))
-            consecutive_skips += 1
-            if consecutive_skips >= MAX_CONSECUTIVE_SKIPS or len(skipped) * 2 > total_windows:
-                logger.error("Giving up after skipping %d of %d windows (%d in a row)", len(skipped), total_windows, consecutive_skips)
-                raise
-            continue
-        consecutive_skips = 0
-        raw_quips.extend(result.quips)
-        context.update(result)
 
-    if skipped:
-        logger.warning("Skipped %d of %d windows: %s", len(skipped), total_windows, [(r.start, r.end) for r in skipped])
-
-    normalized_quips = finalize_timeline(raw_quips, duration)
-    if not normalized_quips:
-        raise llm_service.LLMOutputError("The model produced no usable commentary")
-    logger.info("Timeline: %d quips from %d windows", len(normalized_quips), total_windows)
-
-    await _report("synthesizing", 70)
     semaphore = asyncio.Semaphore(settings.TTS_CONCURRENCY)
-
     start_lock = asyncio.Lock()
     last_start = 0.0
 
@@ -204,25 +174,113 @@ async def process_video_commentary(
                 logger.warning("TTS failed for t=%.2f: %s", quip["timestamp"], e)
                 return None
 
-    finished = 0
+    # Quips are keyed by (timestamp, text). Each window's new quips are synthesized in the background while the next
+    # window is analyzed; `audio` holds the finished clips.
+    audio: Dict[Any, Optional[Dict[str, Any]]] = {}
+    queued: set = set()
+    tts_tasks: List["asyncio.Task[None]"] = []
 
-    async def _counted(quip: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        nonlocal finished
-        result = await _safe_generate_audio(quip)
-        finished += 1
-        await _report("synthesizing", 70 + int(20 * finished / len(normalized_quips)))
-        return result
+    def _key(quip: Dict[str, Any]) -> Any:
+        return (quip["timestamp"], quip["text"])
 
-    results = await asyncio.gather(*(_counted(q) for q in normalized_quips))
+    def _with_audio(quips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        merged = []
+        for quip in quips:
+            clip = audio.get(_key(quip))
+            payload = dict(quip)
+            payload["audio_url"] = clip.get("audio_url") if clip else None
+            payload["duration_sec"] = clip.get("duration_sec") if clip and payload["audio_url"] else None
+            merged.append(payload)
+        return merged
+
+    def _publish() -> None:
+        """Hand the finished quips so far to partial_cb: the leading run of queued quips that have their audio result,
+        scheduled the same way as the final timeline (scheduling only looks at earlier quips)."""
+        if partial_cb is None:
+            return
+        ready = []
+        for quip in finalize_timeline(raw_quips, duration):
+            if _key(quip) not in audio:
+                break
+            ready.append(quip)
+        try:
+            windows_done = 0  # one task per handled window: count the leading run that has finished
+            while windows_done < len(tts_tasks) and tts_tasks[windows_done].done():
+                windows_done += 1
+            partial_cb(CommentaryPartial(
+                quips=[CommentaryQuip(**q) for q in schedule_quips(_with_audio(ready), duration)],
+                windows_done=windows_done,
+                total_windows=total_windows,
+                ready_until=round(windows[windows_done - 1][1], 2) if windows_done else 0.0,
+            ))
+        except Exception as e:
+            logger.warning("Partial result callback failed: %s", e)
+
+    async def _synthesize(batch: List[Dict[str, Any]]) -> None:
+        for quip, clip in zip(batch, await asyncio.gather(*(_safe_generate_audio(q) for q in batch))):
+            audio[_key(quip)] = clip
+
+    def _queue_new_quips() -> None:
+        batch = [q for q in finalize_timeline(raw_quips, duration) if _key(q) not in queued]
+        queued.update(_key(q) for q in batch)
+        task = asyncio.create_task(_synthesize(batch))
+        task.add_done_callback(lambda t: None if t.cancelled() else _publish())
+        tts_tasks.append(task)
+
+    analyzing_started = time.monotonic()
+    try:
+        for i, (start, end) in enumerate(windows):
+            avg = (time.monotonic() - analyzing_started) / i if i else None
+            await _report("analyzing", 20 + int(45 * i / total_windows), analyzing_message(i, total_windows, avg))
+            label = f"window {i + 1}/{total_windows}"
+            try:
+                result = await analyze_window_with_retry(video_path, start, end, box, context, label, style)
+            except Exception as exc:
+                if is_unreachable(exc):
+                    logger.error("%s: the model server is unreachable; failing the job instead of skipping", label)
+                    raise
+                logger.exception("%s (%.1fs-%.1fs) failed, skipping it", label, start, end)
+                skipped.append(SkippedRange(start=round(start, 2), end=round(end, 2)))
+                consecutive_skips += 1
+                if consecutive_skips >= MAX_CONSECUTIVE_SKIPS or len(skipped) * 2 > total_windows:
+                    logger.error("Giving up after skipping %d of %d windows (%d in a row)", len(skipped), total_windows, consecutive_skips)
+                    raise
+                _queue_new_quips()
+                continue
+            consecutive_skips = 0
+            raw_quips.extend(result.quips)
+            context.update(result)
+            _queue_new_quips()
+
+        if skipped:
+            logger.warning("Skipped %d of %d windows: %s", len(skipped), total_windows, [(r.start, r.end) for r in skipped])
+
+        normalized_quips = finalize_timeline(raw_quips, duration)
+        if not normalized_quips:
+            raise llm_service.LLMOutputError("The model produced no usable commentary")
+        logger.info("Timeline: %d quips from %d windows", len(normalized_quips), total_windows)
+
+        await _report("synthesizing", 70)
+        await asyncio.gather(*tts_tasks)
+        # A quip that was kept early can be dropped by the final timeline (or a late one added) only when a window
+        # returned timestamps outside its own range. Reconcile so the result equals the all-at-end flow.
+        final_keys = {_key(q) for q in normalized_quips}
+        for key in [k for k in audio if k not in final_keys]:
+            clip = audio.pop(key)
+            if clip and clip.get("audio_url"):
+                tts_service.remove_clip_file(video_id, clip["audio_url"])
+        late = [q for q in normalized_quips if _key(q) not in audio]
+        for quip, clip in zip(late, await asyncio.gather(*(_safe_generate_audio(q) for q in late))):
+            audio[_key(quip)] = clip
+    finally:
+        pending = [t for t in tts_tasks if not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
     await _report("synthesizing", 90)
 
-    with_audio: List[Dict[str, Any]] = []
-    for quip, result in zip(normalized_quips, results):
-        payload = dict(quip)
-        payload["audio_url"] = result.get("audio_url") if result else None
-        payload["duration_sec"] = result.get("duration_sec") if result and payload["audio_url"] else None
-        with_audio.append(payload)
-
+    with_audio = _with_audio(normalized_quips)
     scheduled = schedule_quips(with_audio, duration)
     kept_urls = {q["audio_url"] for q in scheduled if q["audio_url"]}
     for q in with_audio:

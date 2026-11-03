@@ -12,7 +12,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.schemas.events import CommentaryResponse
+from app.schemas.events import CommentaryPartial, CommentaryResponse
 
 logger = logging.getLogger("maneframe.jobs")
 
@@ -32,6 +32,7 @@ class Job(BaseModel):
     progress: int = 0
     message: Optional[str] = None
     result: Optional[CommentaryResponse] = None
+    partial: Optional[CommentaryPartial] = None  # quips so far; dropped when the job ends
     duration: Optional[float] = None  # set with video_media_type once the video is prepared
     video_media_type: Optional[str] = None  # None until the converted copy at video_path is ready to serve
     created_at: float = Field(default_factory=time.time)
@@ -70,6 +71,11 @@ class JobStore:
         job = self.get(job_id)
         job.duration = duration
         job.video_media_type = media_type
+
+    def set_partial(self, job_id: str, partial: CommentaryPartial) -> None:
+        job = self.get(job_id)
+        if job.status not in TERMINAL:
+            job.partial = partial
 
     def get(self, job_id: str) -> Job:
         if job_id not in self._jobs:
@@ -111,6 +117,7 @@ class JobStore:
         job = self.get(job_id)
         if job.status not in TERMINAL:
             job.result = result
+            job.partial = None
             message = "Commentary ready" if result.audio_available else "Commentary ready (audio unavailable)"
             if result.skipped:
                 message += f", skipped {len(result.skipped)} of {result.total_windows} parts"
@@ -120,6 +127,7 @@ class JobStore:
         if not message:
             message = "Processing failed"
         job = self.get(job_id)
+        job.partial = None
         if job.status in TERMINAL:
             job.message = message
             job.updated_at = time.time()
