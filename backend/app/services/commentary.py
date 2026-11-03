@@ -69,8 +69,22 @@ def analyzing_message(index: int, total: int, avg_window_sec: Optional[float]) -
     return message
 
 
-def schedule_quips(quips: List[Dict[str, Any]], video_duration: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Keep spoken quips from overlapping: shift late by up to MAX_SHIFT_SEC, else drop. Quips without audio never block."""
+def schedule_quips(
+    quips: List[Dict[str, Any]],
+    video_duration: Optional[float] = None,
+    logged: Optional[set] = None,
+) -> List[Dict[str, Any]]:
+    """Keep spoken quips from overlapping: shift late by up to MAX_SHIFT_SEC, else drop. Quips without audio never block.
+    Progressive runs reschedule the whole timeline every window; pass the same `logged` set each time so a given shift or
+    drop is logged once."""
+    def _first_time(key: Any) -> bool:
+        if logged is None:
+            return True
+        if key in logged:
+            return False
+        logged.add(key)
+        return True
+
     result: List[Dict[str, Any]] = []
     audio_end: Optional[float] = None
     for quip in sorted(quips, key=lambda q: q["timestamp"]):
@@ -81,9 +95,11 @@ def schedule_quips(quips: List[Dict[str, Any]], video_duration: Optional[float] 
                 new_start = audio_end + AUDIO_GAP_SEC
                 shift = new_start - start
                 if shift > settings.MAX_SHIFT_SEC or (video_duration is not None and new_start >= video_duration):
-                    logger.warning("Dropping quip at t=%.2f: would need a %.2fs shift (max %.2fs) or start after the video ends", start, shift, settings.MAX_SHIFT_SEC)
+                    if _first_time(("drop", start)):
+                        logger.warning("Dropping quip at t=%.2f: would need a %.2fs shift (max %.2fs) or start after the video ends", start, shift, settings.MAX_SHIFT_SEC)
                     continue
-                logger.info("Shifting quip from t=%.2f to t=%.2f to avoid audio overlap", start, new_start)
+                if _first_time(("shift", start, round(new_start, 2))):
+                    logger.info("Shifting quip from t=%.2f to t=%.2f to avoid audio overlap", start, new_start)
                 quip["timestamp"] = start = round(new_start, 2)
             audio_end = start + quip["duration_sec"]
         result.append(quip)
@@ -178,6 +194,7 @@ async def process_video_commentary(
     # window is analyzed; `audio` holds the finished clips.
     audio: Dict[Any, Optional[Dict[str, Any]]] = {}
     queued: set = set()
+    schedule_logged: set = set()  # shifts and drops already logged; every window reschedules the whole timeline
     tts_tasks: List["asyncio.Task[None]"] = []
 
     def _key(quip: Dict[str, Any]) -> Any:
@@ -208,7 +225,7 @@ async def process_video_commentary(
             while windows_done < len(tts_tasks) and tts_tasks[windows_done].done():
                 windows_done += 1
             partial_cb(CommentaryPartial(
-                quips=[CommentaryQuip(**q) for q in schedule_quips(_with_audio(ready), duration)],
+                quips=[CommentaryQuip(**q) for q in schedule_quips(_with_audio(ready), duration, schedule_logged)],
                 windows_done=windows_done,
                 total_windows=total_windows,
                 ready_until=round(windows[windows_done - 1][1], 2) if windows_done else 0.0,
@@ -284,7 +301,7 @@ async def process_video_commentary(
     await _report("synthesizing", 90)
 
     with_audio = _with_audio(normalized_quips)
-    scheduled = schedule_quips(with_audio, duration)
+    scheduled = schedule_quips(with_audio, duration, schedule_logged)
     kept_urls = {q["audio_url"] for q in scheduled if q["audio_url"]}
     for q in with_audio:
         if q["audio_url"] and q["audio_url"] not in kept_urls:

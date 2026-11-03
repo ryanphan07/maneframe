@@ -181,3 +181,12 @@ def test_get_job_endpoint_returns_partial_then_nothing_after_failure():
         job_store.fail("api1", "nope")
         body = client.get("/api/jobs/api1").json()
         assert body["status"] == "error" and body["result"] is None
+
+
+@pytest.mark.anyio
+async def test_a_shift_is_logged_once_across_windows(monkeypatch, three_windows, caplog):
+    # c (10.6) lands inside b (8.0, 3 s long), so it is shifted; the later windows reschedule it again
+    set_replies(monkeypatch, [[q(1, "a"), q(8, "b")], [q(10.6, "c")], [q(22, "d")]])
+    with caplog.at_level("INFO", logger="maneframe.commentary"):
+        await commentary_module.process_video_commentary("v.mp4", partial_cb=lambda p: None)
+    assert caplog.text.count("Shifting quip") == 1

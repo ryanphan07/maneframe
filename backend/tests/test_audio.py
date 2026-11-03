@@ -360,3 +360,17 @@ async def test_dropped_quip_audio_file_is_deleted(monkeypatch, one_window, audio
     result = await commentary_module.process_video_commentary("v.mp4", job_id="job1")
     assert [q.timestamp for q in result.quips] == [1.0]
     assert sorted(os.listdir(audio_dir)) == ["audio_1.00_aaaaaaaa.mp3"]
+
+
+def test_schedule_logs_a_shift_once_when_given_a_logged_set(caplog):
+    logged = set()
+    quips = [aq(0.0, 3.0), aq(2.0)]
+    with caplog.at_level("INFO", logger="maneframe.commentary"):
+        for _ in range(3):
+            commentary_module.schedule_quips(quips, None, logged)
+    assert caplog.text.count("Shifting quip") == 1
+    caplog.clear()
+    with caplog.at_level("INFO", logger="maneframe.commentary"):
+        commentary_module.schedule_quips(quips)
+        commentary_module.schedule_quips(quips)
+    assert caplog.text.count("Shifting quip") == 2  # no set: unchanged behavior
