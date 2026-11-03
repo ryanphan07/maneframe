@@ -116,6 +116,28 @@ def test_frame_count_for_window():
     assert vp.frame_count_for_window(0, 0.2, 6) == 1
 
 
+def test_frame_size_keeps_wide_frames_and_caps_portrait_area():
+    assert vp._frame_size(1920, 1080, 896) == (896, 504)  # 16:9 unchanged
+    assert vp._frame_size(1000, 400, 896) == (896, 358)  # wider than 16:9 unchanged
+    w, h = vp._frame_size(1080, 1920, 896)  # portrait phone clip
+    assert h > w and w < 896
+    assert w * h <= 896 * 896 * 9 / 16
+    assert abs(w / h - 1080 / 1920) < 0.01  # aspect ratio kept
+
+
+def test_sample_window_frames_portrait_stays_within_pixel_budget(tmp_path):
+    path = str(tmp_path / "portrait.avi")
+    writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), float(FPS), (180, 320))
+    for _ in range(FPS * SECONDS):
+        writer.write(np.full((320, 180, 3), 90, dtype=np.uint8))
+    writer.release()
+    frames = vp.sample_window_frames(path, 0.0, 6.0, 3, 128, None)
+    for f in frames:
+        img = cv2.imdecode(np.frombuffer(base64.b64decode(f["image_data"]), np.uint8), cv2.IMREAD_COLOR)
+        assert img.shape[0] > img.shape[1]
+        assert img.shape[0] * img.shape[1] <= 128 * 128 * 9 / 16
+
+
 def test_sample_window_frames_even_spacing_width_and_shared_box(moving_video):
     box = (0.5, 0.25, 1.0, 0.75)
     frames = vp.sample_window_frames(moving_video, 0.0, 6.0, 6, 128, box)
@@ -140,7 +162,7 @@ def seeking_window_frames(path, start, end, n, width, box):
             x0, y0, x1, y1 = box
             frame = frame[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
         fh, fw = frame.shape[:2]
-        out.append((round(t, 2), cv2.resize(frame, (width, max(1, int(fh * width / fw))), interpolation=cv2.INTER_AREA)))
+        out.append((round(t, 2), cv2.resize(frame, vp._frame_size(fw, fh, width), interpolation=cv2.INTER_AREA)))
     cap.release()
     return out
 

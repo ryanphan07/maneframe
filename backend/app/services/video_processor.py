@@ -196,6 +196,17 @@ def frame_count_for_window(start: float, end: float, max_frames: int) -> int:
     return max(1, min(max_frames, math.ceil(end - start)))
 
 
+def _frame_size(fw: int, fh: int, width: int) -> Tuple[int, int]:
+    """Output size for a frame: `width` wide, but never more pixels than a 16:9 frame of that width. Image tokens grow
+    with area, so a portrait phone clip at full width would overflow the model's context."""
+    out_w, out_h = width, max(1, int(fh * width / fw))
+    budget = width * width * 9 / 16
+    if out_w * out_h > budget:
+        scale = math.sqrt(budget / (out_w * out_h))
+        out_w, out_h = max(1, int(out_w * scale)), max(1, int(out_h * scale))
+    return out_w, out_h
+
+
 def sample_window_frames(
     video_path: str,
     start: float,
@@ -236,7 +247,8 @@ def sample_window_frames(
                 x0, y0, x1, y1 = box
                 frame = frame[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
             fh, fw = frame.shape[:2]
-            frame = cv2.resize(frame, (width, max(1, int(fh * width / fw))), interpolation=cv2.INTER_AREA)
+            out_w, out_h = _frame_size(fw, fh, width)
+            frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
             ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if ok:
                 frames.append({"timestamp": round(t, 2), "image_data": base64.b64encode(buf).decode()})
