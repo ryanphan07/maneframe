@@ -38,3 +38,6 @@ eval/results/
 
 # start.ps1 logs
 logs/
+
+# Piper voice models (downloaded by the user, never committed)
+models/

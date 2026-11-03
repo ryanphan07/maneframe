@@ -3,6 +3,8 @@ import hashlib
 import logging
 import os
 import re
+import threading
+import wave
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
@@ -26,16 +28,27 @@ try:
 except ImportError:  # pragma: no cover
     MP3 = None
 
+try:
+    from piper import PiperVoice
+    from piper.config import SynthesisConfig
+except ImportError:  # piper-tts is optional (TTS_ENGINE=piper)
+    PiperVoice = SynthesisConfig = None
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 MIN_AUDIO_BYTES = 200
 DURATION_RECHECK_DELAY_SECONDS = 0.2
 
 
 def measure_duration(path: str) -> Optional[float]:
-    """Return the mp3 duration in seconds, or None if it cannot be read."""
-    if MP3 is None:
-        return None
+    """Return the mp3 or wav duration in seconds, or None if it cannot be read."""
     try:
-        length = float(MP3(path).info.length)
+        if path.lower().endswith(".wav"):
+            with wave.open(path, "rb") as w:
+                length = w.getnframes() / float(w.getframerate())
+        elif MP3 is None:
+            return None
+        else:
+            length = float(MP3(path).info.length)
     except Exception:
         logger.warning("Could not measure duration of %s", path, exc_info=True)
         return None
@@ -80,11 +93,11 @@ def _remove_quietly(path: str) -> None:
 
 
 def clip_path(video_id: str, audio_url: Optional[str]) -> Optional[str]:
-    """The server-side path of the mp3 behind an audio_url, or None if the id or url is not one this app produced."""
+    """The server-side path of the mp3 or wav behind an audio_url, or None if the id or url is not one this app produced."""
     if not audio_url or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", video_id):
         return None
     name = os.path.basename(audio_url.split("?")[0])
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.mp3", name):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.(mp3|wav)", name):
         return None
     return os.path.join(settings.UPLOAD_DIR, "audio", video_id, name)
 
@@ -94,6 +107,41 @@ def remove_clip_file(video_id: str, audio_url: Optional[str]) -> None:
     path = clip_path(video_id, audio_url)
     if path:
         _remove_quietly(path)
+
+
+_piper_voice = None
+_piper_voice_path = None
+_piper_lock = threading.Lock()
+
+
+def piper_model_path() -> str:
+    """PIPER_MODEL_PATH as an absolute path; a relative one is taken from the repo root."""
+    path = settings.PIPER_MODEL_PATH
+    return path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+
+
+def piper_available() -> bool:
+    return PiperVoice is not None and os.path.isfile(piper_model_path())
+
+
+def _synthesize_piper_sync(text: str, path: str) -> None:
+    global _piper_voice, _piper_voice_path
+    model = piper_model_path()
+    with _piper_lock:  # one onnx session, one synthesis at a time
+        if _piper_voice is None or _piper_voice_path != model:
+            _piper_voice = PiperVoice.load(model)
+            _piper_voice_path = model
+        config = SynthesisConfig(length_scale=settings.PIPER_LENGTH_SCALE)
+        with wave.open(path, "wb") as wav_file:
+            _piper_voice.synthesize_wav(text, wav_file, config)
+
+
+async def _synthesize(text: str, path: str) -> None:
+    if settings.TTS_ENGINE == "piper":
+        await asyncio.wait_for(asyncio.to_thread(_synthesize_piper_sync, text, path), timeout=settings.TTS_TIMEOUT_SECONDS)
+    else:
+        communicate = Communicate(text, settings.TTS_VOICE, rate=settings.TTS_RATE)
+        await asyncio.wait_for(communicate.save(path), timeout=settings.TTS_TIMEOUT_SECONDS)
 
 
 async def generate_audio_clip(quip: Dict[str, Any], video_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -108,21 +156,27 @@ async def generate_audio_clip(quip: Dict[str, Any], video_id: Optional[str] = No
     if not text.strip():
         logger.warning("Skipping TTS for empty text at timestamp %s", timestamp)
         return None
-    if not settings.TTS_ENABLED or Communicate is None:
-        logger.warning("TTS is disabled or edge-tts is not installed; no audio for t=%.2f", timestamp)
+    piper = settings.TTS_ENGINE == "piper"
+    if not settings.TTS_ENABLED:
+        logger.warning("TTS is disabled; no audio for t=%.2f", timestamp)
+        return None
+    if piper and not piper_available():
+        logger.warning("TTS_ENGINE=piper but piper-tts or the voice model (%s) is missing; no audio for t=%.2f", piper_model_path(), timestamp)
+        return None
+    if not piper and Communicate is None:
+        logger.warning("edge-tts is not installed; no audio for t=%.2f", timestamp)
         return None
 
     audio_dir = os.path.join(settings.UPLOAD_DIR, "audio", video_id)
     os.makedirs(audio_dir, exist_ok=True)
     text_hash = hashlib.sha1(text.encode()).hexdigest()[:8]
-    audio_filename = f"audio_{timestamp:.2f}_{text_hash}.mp3"
+    audio_filename = f"audio_{timestamp:.2f}_{text_hash}.{'wav' if piper else 'mp3'}"
     audio_path = os.path.join(audio_dir, audio_filename)
 
     attempts = 1 + max(0, settings.TTS_RETRIES)
     for attempt in range(1, attempts + 1):
         try:
-            communicate = Communicate(text, settings.TTS_VOICE, rate=settings.TTS_RATE)
-            await asyncio.wait_for(communicate.save(audio_path), timeout=settings.TTS_TIMEOUT_SECONDS)
+            await _synthesize(text, audio_path)
             if not os.path.exists(audio_path) or os.path.getsize(audio_path) < MIN_AUDIO_BYTES:
                 raise RuntimeError("TTS produced an empty or tiny file")
             break

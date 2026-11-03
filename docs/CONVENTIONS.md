@@ -18,7 +18,7 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (252 backend, 13 frontend) verified 2026-11-03; lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (262 backend, 13 frontend) verified 2026-11-03; lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - One command: `.\start.ps1` (see README Quickstart; settings LLAMA_SERVER_PATH, LLM_MODEL_PATH, LLM_MMPROJ_PATH, LLM_CTX are read by the script only). The backend serves `frontend/dist` at `/` when it exists (`main.mount_frontend`, registered after all routes); the built frontend calls the API same-origin, `npm run dev` still targets :8000.
@@ -72,6 +72,9 @@ idle -> uploading -> extracting -> analyzing -> synthesizing -> completed
 ## Testing
 - Tests assert behavior. Mock only external boundaries (LLM client, TTS, OpenCV I/O), not the logic under test.
 - Run backend tests and frontend tests/lint/build before every commit. One logical change per commit.
+
+## TTS
+- `TTS_ENGINE` is `edge` (default, mp3, online) or `piper` (offline, CPU, wav; `piper-tts` is optional and not in requirements.txt). Both go through `tts.generate_audio_clip` and return `audio_url` plus `duration_sec` measured from the file (`measure_duration` reads mp3 and wav). `clip_path` accepts only `.mp3` and `.wav` names. Voice models live in the git-ignored `models/` folder (`PIPER_MODEL_PATH`); never commit them. The real Piper test skips when Piper or the voice is absent.
 
 ## Timing
 - Spoken-line scheduling is server-side (`commentary.schedule_quips`). Measured TTS speed: about 1.8 words per second including padding (8 words = 4.5 s). Keep `MIN_QUIP_GAP_SEC` (4.5) and the prompt's spacing and length rules (4.5 s apart, 10 words) consistent with that. Quip text is never truncated.

@@ -27,7 +27,7 @@ The goal is a better product for real users: lion dance teams turning performanc
 - Phone clips (done, session 23): HEVC, other codecs OpenCV may not decode and clips with rotation metadata are transcoded to upright H.264 (session 27: as the job's first step, not in the upload request). Untested on a real phone clip. The player falls back to `GET /api/jobs/{id}/video` when the browser cannot decode the local file (session 27); untested with a real HEVC clip in a browser.
 - Export hardening (done, session 23): filter graph via `-filter_complex_script`, quip inputs as relative paths (300 quips tested), and the browser no longer buffers the mp4 (`POST /api/jobs/{id}/export` renders, then the download is a plain link).
 - Hardening and tests (done, session 29): transcode progress and timeout, frame-sampling edge cases, Vitest frontend tests, progressive results run live.
-- Smaller items: show dropped quips as skipped; keep the volume setting while a clip ducks the video; offline TTS provider behind `TTS_PROVIDER` (D3).
+- Smaller items: show dropped quips as skipped; keep the volume setting while a clip ducks the video; offline TTS (done in session 32 as `TTS_ENGINE=piper`; D3).
 
 ## Phase 3: distribution (undecided)
 Local packaging versus a hosted service.

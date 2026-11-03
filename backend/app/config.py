@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     MAX_QUIPS_PER_WINDOW: int = 3
     MIN_QUIP_GAP_SEC: float = 4.5  # measured TTS: about 4.5 s for an 8-word line
 
+    TTS_ENGINE: Literal["edge", "piper"] = "edge"  # edge: online edge-tts (mp3); piper: offline CPU voice (wav), see README
+    PIPER_MODEL_PATH: str = "models/piper/en_US-lessac-medium.onnx"  # relative paths start at the repo root; the folder is git-ignored
+    PIPER_LENGTH_SCALE: float = 0.9  # below 1 speaks faster (edge's +10% is about 0.9)
     TTS_VOICE: str = "en-US-GuyNeural"
     TTS_RATE: str = "+10%"
     TTS_ENABLED: bool = True

@@ -106,3 +106,29 @@ Git commit 012f23c. Clip hoco_40s.mp4 (40.2 s, 101.7 MB), style hype, default se
 - Run 3 (no TTS) was not faster than run 2 (181.7 s against 165.4 s), and its uncached windows were as slow as run 1's (about 49 to 53 s). So TTS is not what slows the windows here; per-call time varies by about 10 s between runs and one run each does not separate that from noise. TTS adds about 2 s after the last window plus the work done in the background while later windows run.
 - Session 26 measured the same model at 172.8 s (38.5 s per window) and session 29 at 221.5 s (about 52 s per window). Today's uncached windows (45 to 53 s) match session 29, not session 26. The cause of the session 26 speed is not established.
 - Run 1 is the figure to quote for a cold start: 211.9 s, about 5.3x real time. Not measured: the 9B on this build, quality of the commentary or audio.
+
+
+## 2026-11-03: edge-tts against Piper (session 32)
+
+Clip hoco_40s.mp4 (40.2 s, 101.7 MB), style hype, default settings except `TTS_ENGINE`, Qwen3.6-35B-A3B UD-Q3_K_XL at `-c 8192` (llama-server b10679 Vulkan, started by hand), uvicorn restarted for each run, `benchmark.py` with `--log`. Piper 1.8.0 (piper-tts) with the `en_US-lessac-medium` voice, `PIPER_LENGTH_SCALE=0.9`, CPU only. Runs back to back in the order edge, piper, edge, piper; the model stayed loaded, so runs 2 to 4 had llama-server's prompt cache for window 1.
+
+| Run | Engine | Total s | Analyze s | Synthesizing phase s | Avg LLM s per call | Quips (audio) | Spoken s | TTS failed |
+|---|---|---|---|---|---|---|---|---|
+| 1 | edge | 148.2 | 142.2 | 2.0 | 35.2 | 7 (6) | 23.8 | 1 |
+| 2 | piper | 128.2 | 124.2 | n/a (under the poll interval) | 30.5 | 6 (6) | 17.9 | 0 |
+| 3 | edge | 134.2 | 120.2 | 10.0 | 29.5 | 8 (8) | 33.8 | 0 |
+| 4 | piper | 120.2 | 116.2 | n/a (under the poll interval) | 28.6 | 6 (6) | 17.5 | 0 |
+
+TTS alone (the app's own `generate_audio_clip`, the same 7 fixed lines of 7 to 9 words, one at a time, no model running; two passes each, alternating):
+
+| Engine | Pass | Per clip s | Total s | Spoken s |
+|---|---|---|---|---|
+| edge | 1 | 1.05, 3.61, 1.51, 1.06, 1.27, 1.55, 1.55 | 11.60 | 22.1 |
+| piper | 1 | 1.87 (voice load), then 0.05 to 0.07 | 2.23 | 16.6 |
+| edge | 2 | 0.80 to 1.07 | 6.13 | 22.1 |
+| piper | 2 | 0.04 to 0.06 | 0.39 | 16.6 |
+
+- Piper's synthesis cost is negligible next to the model: about 0.05 s per line after a one-time voice load of about 2 s on the first line, against 0.8 to 3.6 s per line for edge-tts (network). Total job time is dominated by the 4 uncached model calls (about 30 to 50 s each), so the job-time gap in the first table (148 and 134 s against 128 and 120 s) is mostly model-time variation between runs (analyze s differs by 20 s between the two edge runs), not TTS; TTS time in the pipeline overlaps with later windows, so only the part after the last window shows as "synthesizing" (2 s and 10 s with edge, not visible with piper).
+- Run 1 lost one clip to edge-tts ("No audio was received", retried once, failed again): quip 7 had text only. Piper had no failures in 2 runs, 12 clips.
+- Piper speaks about 25% less audio for the same text (16.6 s against 22.1 s), so its voice is faster even at `PIPER_LENGTH_SCALE=0.9`; the scheduler uses the measured duration, so overlaps are unaffected (0 overlaps in all 4 runs). The quips differ between runs (the model writes new lines each time), which is why "Spoken s" in the first table is not comparable between engines.
+- Not measured: voice quality (subjective; the lessac voice is a flat, clear American voice, edge's GuyNeural is more expressive), other Piper voices, `TTS_ENGINE=piper` through the browser player, a wav in the mp4 export (export reads the file with ffmpeg, which decodes wav; the export tests use mp3).
