@@ -63,6 +63,28 @@ def test_crop_box_found_on_moving_subject_and_logged(moving_video, caplog):
     assert "Crop box" in caplog.text
 
 
+def seeking_frames(path, duration, probe=30):
+    """The previous implementation: one keyframe seek per probe frame."""
+    cap = cv2.VideoCapture(path)
+    try:
+        for i in range(probe):
+            cap.set(cv2.CAP_PROP_POS_MSEC, duration * (i + 0.5) / probe * 1000)
+            ok, frame = cap.read()
+            if ok:
+                yield frame
+    finally:
+        cap.release()
+
+
+def test_sequential_probe_matches_seeking_and_box_stays_within_tolerance(moving_video, monkeypatch):
+    sequential_box = vp.compute_crop_box(moving_video, SECONDS)
+
+    monkeypatch.setattr(vp, "_probe_frames", lambda cap, duration, probe: seeking_frames(moving_video, duration, probe))
+    seeking_box = vp.compute_crop_box(moving_video, SECONDS)
+    assert sequential_box is not None and seeking_box is not None
+    assert sequential_box == pytest.approx(seeking_box, abs=0.03)
+
+
 def test_crop_box_none_when_no_motion(still_video):
     assert vp.compute_crop_box(still_video, SECONDS) is None
 

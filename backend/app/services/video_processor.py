@@ -77,6 +77,27 @@ def is_video_corrupt(file_path: str) -> bool:
     return False
 
 
+def _probe_frames(cap, duration: float, probe: int):
+    """Yield `probe` frames at evenly spaced times in one forward pass: grab() skips the frames in between
+    without converting them, which is far cheaper than a keyframe seek and decode per sample."""
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if not fps or fps <= 0 or total <= 0:
+        return
+    targets = sorted({min(total - 1, int(duration * (i + 0.5) / probe * fps)) for i in range(probe)})
+    index = 0
+    for target in targets:
+        while index < target:
+            if not cap.grab():
+                return
+            index += 1
+        ok, frame = cap.read()
+        index += 1
+        if not ok or frame is None:
+            return
+        yield frame
+
+
 def motion_box(cap, duration, probe=30, probe_w=320, thresh=30, min_hits=3, min_brightness=50) -> Optional[Box]:
     """Return (x0, y0, x1, y1) as fractions of the frame covering where the bright, moving subjects are.
 
@@ -85,11 +106,7 @@ def motion_box(cap, duration, probe=30, probe_w=320, thresh=30, min_hits=3, min_
     there is too little motion or the box would cover more than 80% of the frame.
     """
     grays = []
-    for i in range(probe):
-        cap.set(cv2.CAP_PROP_POS_MSEC, duration * (i + 0.5) / probe * 1000)
-        ok, frame = cap.read()
-        if not ok:
-            continue
+    for frame in _probe_frames(cap, duration, probe):
         h, w = frame.shape[:2]
         small = cv2.resize(frame, (probe_w, max(1, int(h * probe_w / w))), interpolation=cv2.INTER_AREA)
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
