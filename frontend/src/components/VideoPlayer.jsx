@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import LabelPanel from './LabelPanel';
 
 const STALE_SECONDS = 4;
 const DUCKED_VOLUME = 0.3;
 
 const formatTime = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
-const VideoPlayer = ({ videoUrl, commentaryQuips, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 } }) => {
+const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 } }) => {
   const videoRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [audioBlocked, setAudioBlocked] = useState(false);
@@ -164,6 +165,8 @@ const VideoPlayer = ({ videoUrl, commentaryQuips, processingStatus, audioAvailab
           ))}
         </div>
       )}
+
+      {isCompleted && jobId && <LabelPanel videoRef={videoRef} jobId={jobId} apiBase={apiBase} />}
     </div>
   );
 };

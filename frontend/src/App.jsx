@@ -324,6 +324,8 @@ function App() {
             <VideoPlayer
               key={videoUrl}
               videoUrl={videoUrl}
+              jobId={exportJob?.jobId}
+              apiBase={API_BASE}
               commentaryQuips={commentaryQuips}
               audioAvailable={audioAvailable}
               skipped={skipped}
