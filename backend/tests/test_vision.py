@@ -733,3 +733,38 @@ async def test_json_schema_setting_controls_response_format(monkeypatch, prompt_
     assert schema["required"] == ["seen", "quips"]
     assert schema["properties"]["quips"]["maxItems"] == settings.MAX_QUIPS_PER_WINDOW
     assert schema["properties"]["quips"]["items"]["required"] == ["t", "text"]
+
+
+class _FakeCap:
+    """A capture whose reads start failing after `good` frames."""
+    def __init__(self, fps=25.0, good=2):
+        self.fps, self.good, self.reads = fps, good, 0
+    def isOpened(self): return True
+    def get(self, prop):
+        return self.fps if prop == vp.cv2.CAP_PROP_FPS else 0
+    def set(self, prop, value): return True
+    def grab(self): return True
+    def read(self):
+        self.reads += 1
+        if self.reads > self.good:
+            return False, None
+        return True, np.zeros((48, 64, 3), dtype=np.uint8)
+    def release(self): pass
+
+
+@pytest.mark.parametrize("fps", [0, -1.0])
+def test_sample_window_frames_rejects_unusable_frame_rate_with_a_user_safe_message(monkeypatch, fps):
+    from app.services import pipeline
+    monkeypatch.setattr(vp.cv2, "VideoCapture", lambda p: _FakeCap(fps=fps))
+    with pytest.raises(vp.UnusableVideo) as info:
+        vp.sample_window_frames("x.mp4", 0.0, 4.0, 4, 64, None)
+    assert pipeline.friendly_error(info.value) == str(info.value)
+    assert "frame rate" in str(info.value)
+
+
+def test_sample_window_frames_keeps_frames_read_before_a_failed_read(monkeypatch, caplog):
+    monkeypatch.setattr(vp.cv2, "VideoCapture", lambda p: _FakeCap(good=2))
+    with caplog.at_level("WARNING", logger="maneframe.video"):
+        frames = vp.sample_window_frames("x.mp4", 0.0, 4.0, 4, 64, None)
+    assert len(frames) == 2
+    assert "keeping the 2 frames" in caplog.text

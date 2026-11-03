@@ -75,3 +75,16 @@ def test_format_table_and_section(tmp_path):
     benchmark.append_section(out, benchmark.format_section("2026-10-29", {"Model": "m"}, [ok], []))
     text = out.read_text(encoding="utf-8")
     assert text.startswith("# Benchmarks") and "## 2026-10-28" in text and "## 2026-10-29" in text and "- Model: m" in text
+
+
+def test_parse_log_attributes_llm_lines_by_job_id():
+    log = (
+        "INFO maneframe.jobs: Created job aaa111\n"
+        "INFO maneframe.jobs: Created job bbb222\n"
+        "INFO maneframe.llm: LLM window 1/1 (job aaa111): frames=6 prompt_tokens=10 completion_tokens=5 seconds=3.0\n"
+        "INFO maneframe.llm: LLM window 1/1 (job bbb222): frames=6 prompt_tokens=10 completion_tokens=5 seconds=4.0\n"
+    )
+    jobs = benchmark.parse_log(log)
+    assert [w["seconds"] for w in jobs["aaa111"]["windows"]] == [3.0]
+    assert [w["seconds"] for w in jobs["bbb222"]["windows"]] == [4.0]
+    assert jobs["aaa111"]["windows"][0]["label"] == "window 1/1"

@@ -13,6 +13,10 @@ from app.config import settings
 
 logger = logging.getLogger("maneframe.video")
 
+
+class UnusableVideo(ValueError):
+    """The video cannot be sampled; the message is safe to show to the user."""
+
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi"}
 
 Box = Tuple[float, float, float, float]  # (x0, y0, x1, y1) as fractions of the frame
@@ -212,7 +216,7 @@ def sample_window_frames(
     try:
         fps = cap.get(cv2.CAP_PROP_FPS)
         if not fps or fps <= 0:
-            raise ValueError("The video has no usable frame rate")
+            raise UnusableVideo("The video has no usable frame rate, so it cannot be analyzed.")
         times = [start + (end - start) * (i + 0.5) / n for i in range(n)]
         # One seek to the first sample, then a forward pass: grab() skips the frames in between without converting them,
         # which is much cheaper than a keyframe seek and decode per sample.
@@ -225,6 +229,7 @@ def sample_window_frames(
             ok, frame = cap.read()
             index += 1
             if not ok or frame is None:
+                logger.warning("Frame read failed at %.2fs in window %.1f-%.1fs; keeping the %d frames read so far", t, start, end, len(frames))
                 break
             if box:
                 h, w = frame.shape[:2]

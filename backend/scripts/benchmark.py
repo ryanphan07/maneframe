@@ -1,11 +1,12 @@
 """Benchmark the running backend on real clips and append a dated section to docs/BENCHMARKS.md.
 
 Run from backend/ with the venv active and uvicorn already serving:
-    python scripts/benchmark.py --log ../bench_backend.log [--warm-first]
+    python scripts/benchmark.py --log ../bench_backend.log [--warm-first] [--style deadpan]
 
-Window timings and the Shifting/Dropping/TTS-failed counts come from the backend log. The log has no job id on
-those lines, so each job's lines are the ones between its "Created job <id>" line and the next "Created job" line
-(jobs run one at a time). Status times are polled every POLL_SECONDS, so phase seconds are accurate to about that.
+Window timings and the Shifting/Dropping/TTS-failed counts come from the backend log. The per-window LLM lines
+carry the job id ("LLM window 1/2 (job <id>): ..."), so they are attributed by it. The other lines have no id, so
+they (and LLM lines from older logs) belong to the job whose "Created job <id>" line precedes them (jobs run one at a
+time). Status times are polled every POLL_SECONDS, so phase seconds are accurate to about that.
 """
 import argparse
 import datetime
@@ -41,7 +42,7 @@ DEFAULT_CLIPS = [
 
 CREATED_RE = re.compile(r"Created job (\w+)")
 LLM_RE = re.compile(
-    r"LLM (?P<label>.+?): frames=(?P<frames>\d+) prompt_tokens=(?P<pt>\S+) completion_tokens=(?P<ct>\S+) seconds=(?P<sec>[\d.]+)"
+    r"LLM (?P<label>.+?)(?: \(job (?P<job>\w+)\))?: frames=(?P<frames>\d+) prompt_tokens=(?P<pt>\S+) completion_tokens=(?P<ct>\S+) seconds=(?P<sec>[\d.]+)"
 )
 
 
@@ -49,22 +50,28 @@ def parse_log(text: str) -> Dict[str, Dict[str, Any]]:
     """Per job id: LLM windows (label, prompt/completion tokens, seconds) and counts of Shifting/Dropping/TTS failed."""
     jobs: Dict[str, Dict[str, Any]] = {}
     current: Optional[Dict[str, Any]] = None
+
+    def new_job() -> Dict[str, Any]:
+        return {"windows": [], "shifting": 0, "dropping": 0, "tts_failed": 0}
+
     for line in text.splitlines():
         created = CREATED_RE.search(line)
         if created:
-            current = {"windows": [], "shifting": 0, "dropping": 0, "tts_failed": 0}
-            jobs[created.group(1)] = current
-            continue
-        if current is None:
+            current = jobs.setdefault(created.group(1), new_job())
             continue
         llm = LLM_RE.search(line)
         if llm:
+            target = jobs.setdefault(llm.group("job"), new_job()) if llm.group("job") else current
+            if target is None:
+                continue
             def tok(v: str) -> Optional[int]:
                 return int(v) if v.isdigit() else None
-            current["windows"].append({
+            target["windows"].append({
                 "label": llm.group("label"), "prompt_tokens": tok(llm.group("pt")),
                 "completion_tokens": tok(llm.group("ct")), "seconds": float(llm.group("sec")),
             })
+        if current is None:
+            continue
         if "Shifting quip" in line:
             current["shifting"] += 1
         if "Dropping quip" in line:
@@ -164,7 +171,7 @@ def append_section(path: Path, section: str) -> None:
     path.write_text(existing.rstrip() + "\n\n" + section, encoding="utf-8")
 
 
-def run_clip(client, base_url: str, clip: Path, label: str) -> Dict[str, Any]:
+def run_clip(client, base_url: str, clip: Path, label: str, style: Optional[str] = None) -> Dict[str, Any]:
     from app.services.video_processor import get_video_duration
 
     result: Dict[str, Any] = {
@@ -176,7 +183,7 @@ def run_clip(client, base_url: str, clip: Path, label: str) -> Dict[str, Any]:
     except Exception as exc:
         print(f"  could not read duration: {exc}")
     with clip.open("rb") as fh:
-        resp = client.post(f"{base_url}/api/upload", files={"file": (clip.name, fh)}, timeout=600)
+        resp = client.post(f"{base_url}/api/upload", files={"file": (clip.name, fh)}, data={"style": style} if style else None, timeout=600)
     t0 = time.monotonic()
     if resp.status_code != 200:
         result["message"] = f"upload rejected {resp.status_code}: {resp.text[:120]}"
@@ -245,6 +252,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--out", default=str(REPO_DIR / "docs" / "BENCHMARKS.md"))
     parser.add_argument("--log", default=None, help="backend log file, for window timings and Shifting/Dropping/TTS failed counts")
+    parser.add_argument("--style", default=None, help="commentary style sent with each upload (server default when omitted)")
     parser.add_argument("--warm-first", action="store_true", help='run the first clip again at the end, labelled "warm (prompt cache)"')
     args = parser.parse_args()
 
@@ -264,10 +272,11 @@ def main() -> int:
         env = environment(args.base_url, settings.LLM_BASE_URL.rstrip("/"), client)
         for clip, label in plan:
             print(f"== {label}")
-            rows.append(run_clip(client, args.base_url, clip, label))
+            rows.append(run_clip(client, args.base_url, clip, label, args.style))
             print(f"  -> {rows[-1]['status']} {rows[-1]['message']}")
 
     notes = [
+        f"Style: {args.style or 'server default'}.",
         f"Phase seconds come from polling every {POLL_SECONDS:.0f} s (about +/-{POLL_SECONDS:.0f} s). Total is wall clock from upload accepted to the first poll that saw `completed`/`error`. "
         "Overlap = consecutive audio quips where timestamp + duration_sec exceeds the next timestamp by more than 0.05 s.",
     ]

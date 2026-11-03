@@ -232,12 +232,15 @@ async def process_video_commentary(
         for i, (start, end) in enumerate(windows):
             avg = (time.monotonic() - analyzing_started) / i if i else None
             await _report("analyzing", 20 + int(45 * i / total_windows), analyzing_message(i, total_windows, avg))
-            label = f"window {i + 1}/{total_windows}"
+            label = f"window {i + 1}/{total_windows}" + (f" (job {job_id})" if job_id else "")
             try:
                 result = await analyze_window_with_retry(video_path, start, end, box, context, label, style)
             except Exception as exc:
                 if is_unreachable(exc):
                     logger.error("%s: the model server is unreachable; failing the job instead of skipping", label)
+                    raise
+                if isinstance(exc, video_processor_service.UnusableVideo):
+                    logger.error("%s: %s; failing the job instead of skipping", label, exc)
                     raise
                 logger.exception("%s (%.1fs-%.1fs) failed, skipping it", label, start, end)
                 skipped.append(SkippedRange(start=round(start, 2), end=round(end, 2)))
