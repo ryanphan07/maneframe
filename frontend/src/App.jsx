@@ -12,6 +12,13 @@ const MAX_BACKOFF_MS = 10000;
 const POLL_INTERVAL_MS = 5000;
 const MAX_POLL_FAILURES = 60; // about 5 minutes without reaching the server
 
+// Must match the files in backend/app/prompts/styles/ (the server rejects other values).
+const STYLES = [
+  { value: 'hype', label: 'Hype' },
+  { value: 'deadpan', label: 'Deadpan' },
+  { value: 'broadcast', label: 'Broadcast' },
+];
+
 const PHASE_LABELS = {
   uploading: 'Uploading',
   extracting: 'Extracting frames',
@@ -55,6 +62,7 @@ function App() {
   const [exportJob, setExportJob] = useState(null);
   const [captions, setCaptions] = useState(true);
   const [rendering, setRendering] = useState(false);
+  const [style, setStyle] = useState('hype');
 
   const socketRef = useRef(null);
   const reconnectTimerRef = useRef(null);
@@ -216,6 +224,7 @@ function App() {
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('style', style);
 
     try {
       const { data } = await axios.post(`${API_BASE}/api/upload`, formData);
@@ -268,6 +277,14 @@ function App() {
       <header className="App-header">
         <h1>Maneframe</h1>
         <input type="file" accept="video/*" onChange={handleVideoUpload} disabled={inFlight} />
+        <label style={{ marginLeft: '0.75rem' }}>
+          Style{' '}
+          <select value={style} onChange={(e) => setStyle(e.target.value)} disabled={inFlight} aria-label="Commentary style">
+            {STYLES.map(({ value, label }) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </label>
 
         {processingStatus !== 'idle' && (
           <div style={{ margin: '1rem 0', maxWidth: '360px' }}>
