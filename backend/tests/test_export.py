@@ -67,8 +67,8 @@ def test_args_mix_delayed_quips_over_ducked_original_audio():
     graph = graph_of(quips)
     assert [args[i + 1] for i, a in enumerate(args) if a == "-i"] == ["C:/up/v.mp4", "/audio/a.mp3", "/audio/b.mp3"]
     assert "[0:a]volume=-14dB:enable='between(t,1.5,3.5)+between(t,10,12)'[base]" in graph
-    assert "[1:a]loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=1500:all=1[q1]" in graph
-    assert "[2:a]loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=10000:all=1[q2]" in graph
+    assert "[1:a]acompressor=threshold=-24dB:ratio=3:attack=5:release=80,loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=1500:all=1[q1]" in graph
+    assert "[2:a]acompressor=threshold=-24dB:ratio=3:attack=5:release=80,loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=10000:all=1[q2]" in graph
     assert "[base][q1][q2]amix=inputs=3:duration=first:normalize=0" in graph
     assert args[args.index("-filter_complex_script") + 1] == "filter_graph.txt" and "-filter_complex" not in args
     assert args[args.index("-map") + 1] == "[vout]" and "[aout]" in args
@@ -89,7 +89,7 @@ def test_duck_depth_and_quip_loudness_come_from_arguments_then_settings(monkeypa
 def test_every_spoken_quip_is_normalized_before_the_delay_and_silent_ones_are_not_inputs():
     graph = graph_of([spoken(1.0, 2.0, "a"), silent(5.0), spoken(9.0, 1.0, "b")])
     assert graph.count("loudnorm") == 2
-    assert all(c.index("loudnorm") < c.index("adelay") for c in graph.splitlines() if "adelay" in c)
+    assert all(c.index("acompressor") < c.index("loudnorm") < c.index("adelay") for c in graph.splitlines() if "adelay" in c)
 
 
 def test_captions_use_a_relative_subtitle_filename():

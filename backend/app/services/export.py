@@ -16,6 +16,9 @@ from app.services import tts as tts_service
 
 logger = logging.getLogger("maneframe.export")
 
+# TTS clips are peaky (piper hits 0 dBFS at -20 LUFS), and loudnorm cannot raise them without clipping, so a gentle
+# compressor evens them out first; measured spread of quip loudness 7 dB without it, 2.5 dB with it
+QUIP_COMPRESSOR = "acompressor=threshold=-24dB:ratio=3:attack=5:release=80"
 DUCK_MERGE_GAP_SEC = 0.5  # quips closer than this share one ducked stretch instead of pumping the volume
 NO_AUDIO_CAPTION_SEC = 3.0
 CRF = 23
@@ -165,7 +168,7 @@ def build_filter_graph(
         for i, quip in enumerate(spoken, start=1):
             delay_ms = max(0, round(quip.timestamp * 1000))
             graph.append(
-                f"[{i}:a]loudnorm=I={_num(quip_lufs)}:TP=-1.5:LRA=7,aresample=48000,adelay={delay_ms}:all=1[q{i}]"
+                f"[{i}:a]{QUIP_COMPRESSOR},loudnorm=I={_num(quip_lufs)}:TP=-1.5:LRA=7,aresample=48000,adelay={delay_ms}:all=1[q{i}]"
             )
             labels.append(f"[q{i}]")
         graph.append(
