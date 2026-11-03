@@ -90,3 +90,13 @@ Notes:
 - API smoke test, both models: upload completed (162 s 9B, 135 s 35B including TTS, so faster than the benchmark pass because of the prompt cache); POST export returned a url; the mp4 is 40.17 s, 1920x1080 H.264 (High) plus AAC LC 48 kHz stereo; a frame extracted while a quip was active shows the caption at the bottom (looked at: 9B at 12 s, 35B at 17 s); adding, listing, deleting and CSV of a label worked. The first label attempt returned 422 because the smoke script sent `quality` as a number; the API takes the strings in `qualities` ("good", "needs work", "none"), which is by design.
 - Smoke-test labels were deleted afterwards. Models were not changed; the default stays the 9B.
 
+
+## 2026-11-02 23:3x: progressive results, live (session 29)
+
+Git commit 88b3d6f plus the frontend tests. Clip hoco_40s.mp4, style hype, default settings, Qwen3.6-35B-A3B UD-Q3_K_XL at `-c 8192` (`-np 1 -ngl 99 --jinja`), uvicorn started by hand, job polled every 2 s through `GET /api/jobs` (not `benchmark.py`; the 4 LLM lines carry the job id).
+
+- Total 221.5 s (session 26 35B row: 172.8 s). Windows: 55.6, 49.9, 47.9, 53.5 s (session 26: 45.2, 36.6, 36.8, 35.5), 3451-3603 prompt tokens. One run, so whether the 49 s difference is TTS contention or machine state (e.g. other GPU load) is not established; the windows were each 11-17 s slower.
+- First partial quip with `audio_url` visible at 70.5 s (a third of the total), 8 s after window 1 finished. Window 2 finished at about 115 s, window 3 at 163 s; the job went to `synthesizing` at 219.5 s and completed 2 s later.
+- 5 distinct quips were seen as partials, 7 in the final result; none of the 5 vanished and none lost its audio. The other 2 were not seen as partials (the last poll that showed a partial was before the final window's quips appeared, or they arrived with completion; not checked).
+- 1 TTS failure (NoAudioReceived at t=6.70 after the retry); that quip has no audio in the result.
+- The "Shifting quip from t=25.50 to t=25.57" lines repeat once per later window (4 lines for 2 shifts): every window recomputes the timeline over all quips and logs again.

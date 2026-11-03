@@ -13,17 +13,17 @@ Goal: a better product for real users: lion dance teams turning performance clip
 - The system prompt is built by `llm.load_system_prompt(style)` from `backend/app/prompts/commentary_system.txt` (`MAX_QUIPS` is replaced by MAX_QUIPS_PER_WINDOW at load), `lion_dance_glossary.txt` (a leading `DRAFT` line is dropped), `examples.txt` (only if it has non-`#` lines) and `styles/<style>.txt`; the files are read once per process and checked at startup. Each window's user message carries the last 2 windows' `seen` summaries and recent quips as earlier context. `scripts/eval_commentary.py` compares prompts and styles (eval/clips.txt and eval/results/ are git-ignored). The LLM step never falls back to canned text: a window that fails after one retry is skipped and reported (DECISIONS D4); a job where every window fails ends in `error`.
 - TTS: edge-tts (needs internet). Failures yield no audio (`audio_url` null), never placeholder files. Settings: TTS_VOICE, TTS_RATE, TTS_TIMEOUT_SECONDS, TTS_CONCURRENCY (1), TTS_START_STAGGER_SECONDS (0.3), TTS_RETRIES, TTS_RETRY_DELAY_SECONDS, MAX_SHIFT_SEC. Retried once: timeouts, connection errors, 5xx, edge-tts NoAudioReceived/WebSocketError; never 401/403. `backend/scripts/tts_check.py` smoke-tests the TTS path.
 - mp4 export uses ffmpeg: `FFMPEG_PATH` if set, else the binary bundled with `imageio-ffmpeg` (requirements.txt). Exports are rendered on demand into `uploads/exports/<job id>/`; the ffmpeg command is built by pure functions in `services/export.py`. The filter graph is passed with `-filter_complex_script` (file `filter_graph.txt` in that folder) and quip audio as relative paths, to stay under the Windows command-line limit. The subtitles filter gets a relative file name and ffmpeg runs with that folder as cwd (no Windows path escaping).
-- Uploads that are HEVC, otherwise undecodable by OpenCV or carry rotation metadata are transcoded in place to upright H.264 by `services/transcode.py` (needs ffmpeg; skipped without it). This is the job's first step (`pipeline.prepare_video`: status `extracting`, message `Converting video`), not part of the upload request; the corruption and length checks follow it, and a rejected clip ends the job in `error` with a user-safe `VideoRejected` message.
+- Uploads that are HEVC, otherwise undecodable by OpenCV or carry rotation metadata are transcoded in place to upright H.264 by `services/transcode.py` (needs ffmpeg; skipped without it). This is the job's first step (`pipeline.prepare_video`: status `extracting`, message `Converting video 40%` while ffmpeg runs (it reports progress through `-progress`; every report counts as job activity, so `JOB_STALE_SECONDS` only catches a hung ffmpeg; `TRANSCODE_TIMEOUT_SECONDS` (3600) is a hard cap and must stay above `JOB_STALE_SECONDS`)), not part of the upload request; the corruption and length checks follow it, and a rejected clip ends the job in `error` with a user-safe `VideoRejected` message.
 - All settings come from the single shared `settings` object in `backend/app/config.py`. No hardcoded URLs or paths elsewhere.
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (229) verified 2026-11-02; lint and build verified 2026-10-29, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (247 backend, 13 frontend) verified 2026-11-02; lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
 - Frontend setup (once): `cd frontend; npm install`. Optional `frontend/.env` with `VITE_API_BASE` (default http://localhost:8000); see `.env.example`.
-- Frontend: `cd frontend; npm run lint; npm run build; npm run dev` (dev server on http://localhost:5173).
+- Frontend: `cd frontend; npm test; npm run lint; npm run build; npm run dev` (dev server on http://localhost:5173).
 
 ## Documentation
 - Update docs once at the end of each batch of work, not after every edit:
@@ -70,7 +70,7 @@ idle -> uploading -> extracting -> analyzing -> synthesizing -> completed
 
 ## Testing
 - Tests assert behavior. Mock only external boundaries (LLM client, TTS, OpenCV I/O), not the logic under test.
-- Run backend tests and frontend lint/build before every commit. One logical change per commit.
+- Run backend tests and frontend tests/lint/build before every commit. One logical change per commit.
 
 ## Timing
 - Spoken-line scheduling is server-side (`commentary.schedule_quips`). Measured TTS speed: about 1.8 words per second including padding (8 words = 4.5 s). Keep `MIN_QUIP_GAP_SEC` (4.5) and the prompt's spacing and length rules (4.5 s apart, 10 words) consistent with that. Quip text is never truncated.

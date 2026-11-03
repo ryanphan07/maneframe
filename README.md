@@ -79,7 +79,7 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | `TTS_VOICE`, `TTS_RATE`, `TTS_TIMEOUT_SECONDS`, `TTS_CONCURRENCY`, `TTS_RETRIES`, `TTS_RETRY_DELAY_SECONDS`, `TTS_ENABLED` | en-US-GuyNeural, +10%, 30, 1, 1, 1, true | Speech |
 | `MAX_SHIFT_SEC` | 2.0 | Largest delay allowed to avoid audio overlap |
 | `LABELS_DIR` | `data/labels` | Where moment labels are stored, one `<sha256 of the video>.json` per clip; git-ignored and kept after jobs expire |
-| `FFMPEG_PATH`, `EXPORT_TIMEOUT_SECONDS` | bundled, 1800 | ffmpeg for mp4 export: empty uses the binary from `imageio-ffmpeg` (installed by requirements.txt); set a path to use your own |
+| `FFMPEG_PATH`, `EXPORT_TIMEOUT_SECONDS`, `TRANSCODE_TIMEOUT_SECONDS` | bundled, 1800, 3600 | ffmpeg for mp4 export: empty uses the binary from `imageio-ffmpeg` (installed by requirements.txt); set a path to use your own |
 | `MAX_VIDEO_SECONDS`, `MAX_UPLOAD_MB` | 1800, 2048 | Upload limits (guards, not speed promises) |
 | `JOB_TTL_SECONDS`, `JOB_STALE_SECONDS`, `CLEANUP_INTERVAL_SECONDS` | 3600, 1800, 600 | Job expiry; stale-running-job timeout; cleanup interval |
 | `CORS_ORIGINS`, `PUBLIC_BASE_URL`, `LOG_LEVEL` | localhost:5173/3000, http://localhost:8000, INFO | Server |
@@ -91,8 +91,8 @@ To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python s
 ## Tests
 
 ```powershell
-pytest backend/tests -q          # 229 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
-cd frontend; npm run lint; npm run build
+pytest backend/tests -q          # 247 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest
+cd frontend; npm test; npm run lint; npm run build
 ```
 Not covered by automated tests: the real model, the real TTS service, browser playback sync (checked by hand, see How it was tested).
 
@@ -108,7 +108,7 @@ Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M vi
 The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
-- 229 automated tests (LLM and edge-tts faked; real tiny videos and a real mp3), frontend lint and build.
+- 247 backend tests (LLM and edge-tts faked; real tiny videos and a real mp3), 13 frontend tests (Vitest), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
 - Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, the 35B-A3B model, other machines.
