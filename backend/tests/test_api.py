@@ -87,9 +87,16 @@ def test_upload_rejects_missing_filename(client, upload_dir, video_bytes):
     assert os.listdir(upload_dir / "videos") == []
 
 
-def test_upload_rejects_corrupt_video_and_removes_file(client, upload_dir):
-    resp = upload(client, b"not a video")
-    assert resp.status_code == 400
+def failed_job(client, resp):
+    assert resp.status_code == 200
+    job = client.get(f"/api/jobs/{resp.json()['job_id']}").json()
+    assert job["status"] == "error"
+    return job
+
+
+def test_corrupt_video_fails_the_job_and_removes_file(client, upload_dir):
+    job = failed_job(client, upload(client, b"not a video"))
+    assert job["message"] == "The uploaded video file is corrupt."
     assert os.listdir(upload_dir / "videos") == []
 
 
@@ -199,18 +206,17 @@ def test_video_file_on_disk_is_not_served(client):
         os.remove(probe)
 
 
-def test_upload_rejects_too_long_video_and_removes_file(client, upload_dir, video_bytes, monkeypatch):
+def test_too_long_video_fails_the_job_and_removes_file(client, upload_dir, video_bytes, monkeypatch):
     monkeypatch.setattr(settings, "MAX_VIDEO_SECONDS", 1.0)
-    resp = upload(client, video_bytes)  # 3s clip
-    assert resp.status_code == 400
-    assert "too long" in resp.json()["detail"]
+    job = failed_job(client, upload(client, video_bytes))  # 3s clip
+    assert "too long" in job["message"]
     assert os.listdir(upload_dir / "videos") == []
 
 
-def test_upload_rejects_zero_fps_video_and_removes_file(client, upload_dir, video_bytes, monkeypatch):
-    monkeypatch.setattr(main_module, "get_video_duration", lambda p: (_ for _ in ()).throw(ValueError("The uploaded video could not be read.")))
-    resp = upload(client, video_bytes)
-    assert resp.status_code == 400
+def test_zero_fps_video_fails_the_job_and_removes_file(client, upload_dir, video_bytes, monkeypatch):
+    monkeypatch.setattr(pipeline_module, "get_video_duration", lambda p: (_ for _ in ()).throw(ValueError("The uploaded video could not be read.")))
+    job = failed_job(client, upload(client, video_bytes))
+    assert job["message"] == "The uploaded video could not be read."
     assert os.listdir(upload_dir / "videos") == []
 
 
@@ -246,7 +252,7 @@ def test_unhandled_error_returns_generic_500(upload_dir, monkeypatch):
 
 
 def test_save_failure_cleans_up_partial_file(client, upload_dir, video_bytes, monkeypatch):
-    monkeypatch.setattr(main_module, "is_video_corrupt", lambda p: (_ for _ in ()).throw(OSError("disk")))
+    monkeypatch.setattr(main_module.job_store, "create", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
     resp = TestClient(app, raise_server_exceptions=False).post(
         "/api/upload", files={"file": ("clip.avi", video_bytes, "video/x-msvideo")}
     )
@@ -377,3 +383,35 @@ def test_upload_rejects_unknown_style_without_writing(client, upload_dir, video_
     assert resp.status_code == 400
     assert "broadcast, deadpan, hype" in resp.json()["detail"]
     assert os.listdir(upload_dir / "videos") == []
+
+
+def test_upload_route_only_stores_the_file(client, upload_dir, video_bytes, monkeypatch):
+    """Conversion is the job's first step, not part of the request."""
+    async def forbidden(*a, **k):
+        raise AssertionError("the upload route must not convert the video")
+
+    async def no_pipeline(*a, **k):
+        return None
+
+    monkeypatch.setattr(pipeline_module, "normalize_video", forbidden)
+    monkeypatch.setattr(main_module, "run_pipeline", no_pipeline)
+    resp = upload(client, video_bytes)
+    assert resp.status_code == 200
+    stored = upload_dir / "videos" / f"{resp.json()['job_id']}_clip.avi"
+    assert stored.read_bytes() == video_bytes
+    assert client.get(f"/api/jobs/{resp.json()['job_id']}").json()["status"] == "uploading"
+
+
+@pytest.mark.anyio
+async def test_conversion_is_the_first_job_step_and_reports_progress(upload_dir, video_bytes):
+    path = str(upload_dir / "v.avi")
+    with open(path, "wb") as f:
+        f.write(video_bytes)
+    steps = []
+
+    async def cb(status, progress, message=None):
+        steps.append((status, message))
+
+    duration = await pipeline_module.prepare_video(path, cb)
+    assert steps == [("extracting", "Converting video")]
+    assert duration == pytest.approx(3.0, abs=0.3)

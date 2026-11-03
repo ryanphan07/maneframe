@@ -139,7 +139,7 @@ async def process_video_commentary(
         except Exception as e:
             logger.warning("Progress callback failed: %s", e)
 
-    await _report("extracting", 10)
+    await _report("extracting", 10, "Finding the action")
     duration = await asyncio.to_thread(video_processor_service.get_video_duration, video_path)
     box = await asyncio.to_thread(video_processor_service.compute_crop_box, video_path, duration)
     windows = video_processor_service.plan_windows(duration, settings.WINDOW_SECONDS)

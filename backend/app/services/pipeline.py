@@ -6,15 +6,21 @@ import shutil
 from typing import Optional
 
 from app.config import settings
-from app.services.export import forget_job_locks
+from app.services.export import ExportError, forget_job_locks
 from app.services.commentary import process_video_commentary
 from app.services.llm import DEFAULT_STYLE, LLMOutputError
 from app.services.jobs import job_store
+from app.services.transcode import normalize_video
+from app.services.video_processor import get_video_duration, is_video_corrupt
 
 logger = logging.getLogger("maneframe.pipeline")
 
 
 GENERIC_FAILURE = "Commentary generation failed"
+
+
+class VideoRejected(ValueError):
+    """The upload cannot be used; the message is safe to show to the user."""
 
 
 def friendly_error(exc: BaseException) -> str:
@@ -32,6 +38,8 @@ def friendly_error(exc: BaseException) -> str:
         return "The AI model is not reachable or timed out. Is llama-server running?"
     if isinstance(exc, LLMOutputError):
         return "The AI model returned unusable output. Try again."
+    if isinstance(exc, VideoRejected):
+        return str(exc)
     if isinstance(exc, ValueError):
         return "The video could not be processed."
     return GENERIC_FAILURE
@@ -88,6 +96,26 @@ def sweep_uploads() -> int:
     return removed
 
 
+async def prepare_video(video_path: str, progress_cb) -> float:
+    """First job step: make the upload readable (upright H.264 when needed), then check it. Returns the duration.
+    Raises VideoRejected for a corrupt, unconvertible or too long video."""
+    await progress_cb("extracting", 2, "Converting video")
+    try:
+        readable = not await asyncio.to_thread(is_video_corrupt, video_path)
+        await normalize_video(video_path, readable)
+    except ExportError:
+        raise VideoRejected("The uploaded video could not be converted to a readable format.")
+    if await asyncio.to_thread(is_video_corrupt, video_path):
+        raise VideoRejected("The uploaded video file is corrupt.")
+    try:
+        duration = await asyncio.to_thread(get_video_duration, video_path)
+    except ValueError as e:
+        raise VideoRejected(str(e))
+    if duration > settings.MAX_VIDEO_SECONDS:
+        raise VideoRejected(f"Video is too long. Maximum length is {settings.MAX_VIDEO_SECONDS:g} seconds.")
+    return duration
+
+
 async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE) -> None:
     task = asyncio.current_task()
     if task is not None:
@@ -99,6 +127,7 @@ async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE)
             logger.warning("Progress update failed for job %s", job_id, exc_info=True)
 
     try:
+        await prepare_video(video_path, progress_cb)
         result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb, style=style)
         job_store.complete(job_id, result)  # the source video stays until the job expires, for mp4 export
     except asyncio.CancelledError:

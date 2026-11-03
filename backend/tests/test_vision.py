@@ -384,6 +384,11 @@ def two_windows(monkeypatch):
     monkeypatch.setattr(vp_, "compute_crop_box", lambda p, d: None)
     monkeypatch.setattr(vp_, "sample_window_frames", lambda p, s, e, n, w, box=None: [{"timestamp": s, "image_data": "abc"}])
 
+    async def no_prepare(path, progress_cb):  # the tests below write a placeholder file, not a real video
+        return 20.0
+
+    monkeypatch.setattr(pipeline_module, "prepare_video", no_prepare)
+
     async def ok_tts(quip, video_id=None):
         return {**quip, "audio_url": "http://x/a.mp3"}
 

@@ -114,24 +114,31 @@ async def test_failed_transcode_raises_and_keeps_no_partial(tmp_path, monkeypatc
     assert not list(tmp_path.glob("*.transcode.mp4"))
 
 
-def test_upload_route_stores_a_rotated_phone_clip_upright(tmp_path, monkeypatch):
+def test_job_stores_a_rotated_phone_clip_upright(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import main as main_module
     from app.config import settings
     from app.main import app
+    from app.services import llm as llm_module
+    from app.services import tts as tts_module
 
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
     monkeypatch.setattr(main_module, "VIDEO_DIR", str(tmp_path / "videos"))
     (tmp_path / "videos").mkdir()
 
-    async def no_pipeline(*a, **k):
-        return None
+    async def fake_llm(frames, start, end, previous=None, label="", **_):
+        return llm_module.WindowResult([{"timestamp": 0.0, "text": "hi"}])
 
-    monkeypatch.setattr(main_module, "run_pipeline", no_pipeline)
+    async def fake_tts(quip, video_id=None):
+        return {"timestamp": quip["timestamp"], "text": quip["text"], "audio_url": None}
+
+    monkeypatch.setattr(llm_module, "analyze_window", fake_llm)
+    monkeypatch.setattr(tts_module, "generate_audio_clip", fake_tts)
     clip = make_clip(tmp_path / "phone.mp4", rotation=90)
     with TestClient(app) as client:
         resp = client.post("/api/upload", files={"file": ("phone.mp4", open(clip, "rb").read(), "video/mp4")})
-    assert resp.status_code == 200, resp.text
+        assert resp.status_code == 200, resp.text
+        assert client.get(f"/api/jobs/{resp.json()['job_id']}").json()["status"] == "completed"
     stored = next((tmp_path / "videos").iterdir())
     assert "rotation of" not in probe(stored) and frame_shape(str(stored)) == (W, H)

@@ -13,12 +13,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.services.export import ExportError, render_export
-from app.services.transcode import normalize_video
 from app.services import labels as label_service
 from app.services import llm as llm_service
 from app.services.jobs import TERMINAL, JobNotFoundError, job_store
 from app.services.pipeline import cleanup_job_files, purge_expired_jobs, run_pipeline, sweep_uploads
-from app.services.video_processor import validate_upload_metadata, sanitize_filename, is_video_corrupt, get_video_duration
+from app.services.video_processor import validate_upload_metadata, sanitize_filename, get_video_duration
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -110,21 +109,6 @@ async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = Fil
                 shutil.copyfileobj(file.file, buffer)
 
         await asyncio.to_thread(_save)
-        try:
-            await normalize_video(video_path, not await asyncio.to_thread(is_video_corrupt, video_path))
-        except ExportError:
-            raise HTTPException(status_code=400, detail="The uploaded video could not be converted to a readable format.")
-        if await asyncio.to_thread(is_video_corrupt, video_path):
-            raise HTTPException(status_code=400, detail="The uploaded video file is corrupt.")
-        try:
-            duration = await asyncio.to_thread(get_video_duration, video_path)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        if duration > settings.MAX_VIDEO_SECONDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Video is too long. Maximum length is {settings.MAX_VIDEO_SECONDS:g} seconds.",
-            )
         if job_store.has_active():  # another upload finished saving first
             raise HTTPException(status_code=409, detail=BUSY_DETAIL)
         job_store.create(video_path, job_id=job_id, style=style)
