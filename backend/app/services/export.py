@@ -16,7 +16,6 @@ from app.services import tts as tts_service
 
 logger = logging.getLogger("maneframe.export")
 
-DUCK_DB = -10
 DUCK_MERGE_GAP_SEC = 0.5  # quips closer than this share one ducked stretch instead of pumping the volume
 NO_AUDIO_CAPTION_SEC = 3.0
 CRF = 23
@@ -140,9 +139,14 @@ def build_filter_graph(
     has_audio: bool,
     quips: List[ExportQuip],
     captions_file: Optional[str] = None,
+    duck_db: Optional[float] = None,
+    quip_lufs: Optional[float] = None,
 ) -> str:
-    """The -filter_complex graph. `captions_file` is relative: ffmpeg runs with the job's export folder as its working
+    """The -filter_complex graph. Each quip is loudness-normalized to `quip_lufs` (loudnorm) so both TTS engines land at
+    the same level, and the original is lowered by `duck_db` while a quip plays; both default to the settings. `captions_file` is relative: ffmpeg runs with the job's export folder as its working
     directory, which keeps drive letters out of the subtitles filter's escaping rules."""
+    duck_db = settings.EXPORT_DUCK_DB if duck_db is None else duck_db
+    quip_lufs = settings.EXPORT_QUIP_LUFS if quip_lufs is None else quip_lufs
     spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
     # even dimensions are required by yuv420p H.264; this changes nothing for even-sized video
     video_filters = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
@@ -154,13 +158,15 @@ def build_filter_graph(
         if has_audio:
             ducks = duck_intervals(spoken)
             enable = "+".join(f"between(t,{_num(a)},{_num(b)})" for a, b in ducks)
-            graph.append(f"[0:a]volume={DUCK_DB}dB:enable='{enable}'[base]")
+            graph.append(f"[0:a]volume={_num(duck_db)}dB:enable='{enable}'[base]")
         else:
             graph.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{_num(duration)}[base]")
         labels = ["[base]"]
         for i, quip in enumerate(spoken, start=1):
             delay_ms = max(0, round(quip.timestamp * 1000))
-            graph.append(f"[{i}:a]adelay={delay_ms}:all=1[q{i}]")
+            graph.append(
+                f"[{i}:a]loudnorm=I={_num(quip_lufs)}:TP=-1.5:LRA=7,aresample=48000,adelay={delay_ms}:all=1[q{i}]"
+            )
             labels.append(f"[q{i}]")
         graph.append(
             f"{''.join(labels)}amix=inputs={len(labels)}:duration=first:normalize=0:dropout_transition=0,"

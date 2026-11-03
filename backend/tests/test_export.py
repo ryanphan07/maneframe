@@ -66,13 +66,30 @@ def test_args_mix_delayed_quips_over_ducked_original_audio():
     args = args_for(quips)
     graph = graph_of(quips)
     assert [args[i + 1] for i, a in enumerate(args) if a == "-i"] == ["C:/up/v.mp4", "/audio/a.mp3", "/audio/b.mp3"]
-    assert "[0:a]volume=-10dB:enable='between(t,1.5,3.5)+between(t,10,12)'[base]" in graph
-    assert "[1:a]adelay=1500:all=1[q1]" in graph and "[2:a]adelay=10000:all=1[q2]" in graph
+    assert "[0:a]volume=-14dB:enable='between(t,1.5,3.5)+between(t,10,12)'[base]" in graph
+    assert "[1:a]loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=1500:all=1[q1]" in graph
+    assert "[2:a]loudnorm=I=-14:TP=-1.5:LRA=7,aresample=48000,adelay=10000:all=1[q2]" in graph
     assert "[base][q1][q2]amix=inputs=3:duration=first:normalize=0" in graph
     assert args[args.index("-filter_complex_script") + 1] == "filter_graph.txt" and "-filter_complex" not in args
     assert args[args.index("-map") + 1] == "[vout]" and "[aout]" in args
     assert args[args.index("-crf") + 1] == "23"
     assert "libx264" in args and "aac" in args and args[-1] == "out.partial.mp4"
+
+
+def test_duck_depth_and_quip_loudness_come_from_arguments_then_settings(monkeypatch):
+    quips = [spoken(1.5, 2.0)]
+    graph = build_filter_graph(60.0, True, quips, None, duck_db=-20, quip_lufs=-14.5)
+    assert "volume=-20dB:enable" in graph and "loudnorm=I=-14.5:" in graph
+    monkeypatch.setattr(settings, "EXPORT_DUCK_DB", -6.0)
+    monkeypatch.setattr(settings, "EXPORT_QUIP_LUFS", -18.0)
+    graph = build_filter_graph(60.0, True, quips, None)
+    assert "volume=-6dB:enable" in graph and "loudnorm=I=-18:" in graph
+
+
+def test_every_spoken_quip_is_normalized_before_the_delay_and_silent_ones_are_not_inputs():
+    graph = graph_of([spoken(1.0, 2.0, "a"), silent(5.0), spoken(9.0, 1.0, "b")])
+    assert graph.count("loudnorm") == 2
+    assert all(c.index("loudnorm") < c.index("adelay") for c in graph.splitlines() if "adelay" in c)
 
 
 def test_captions_use_a_relative_subtitle_filename():

@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     MAX_SHIFT_SEC: float = 2.0
 
     FFMPEG_PATH: str = ""  # empty: use the ffmpeg binary bundled with imageio-ffmpeg
+    EXPORT_DUCK_DB: float = -14.0  # how far the original audio is lowered while a quip plays in the exported mp4
+    EXPORT_QUIP_LUFS: float = -14.0  # each quip is normalized to this loudness before mixing, for both TTS engines
     EXPORT_TIMEOUT_SECONDS: float = 1800.0  # max time for one mp4 render
+    TRANSCODE_MAX_SIDE: int = 1920  # converted phone clips are scaled so the long side is at most this (4K phone clips were far too slow)
+    TRANSCODE_MAX_FPS: float = 30.0  # converted clips above this frame rate are reduced to it (120 fps phone clips)
     TRANSCODE_TIMEOUT_SECONDS: float = 3600.0  # hard cap on converting an upload; progress keeps the job from going stale, see JOB_STALE_SECONDS
 
     LOG_LEVEL: str = "INFO"
