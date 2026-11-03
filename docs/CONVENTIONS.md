@@ -18,7 +18,7 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (262 backend, 13 frontend) verified 2026-11-03; lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (264 backend, 13 frontend) verified 2026-11-03; lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - One command: `.\start.ps1` (see README Quickstart; settings LLAMA_SERVER_PATH, LLM_MODEL_PATH, LLM_MMPROJ_PATH, LLM_CTX are read by the script only). The backend serves `frontend/dist` at `/` when it exists (`main.mount_frontend`, registered after all routes); the built frontend calls the API same-origin, `npm run dev` still targets :8000.
