@@ -45,7 +45,7 @@ Run from the repo root in PowerShell unless noted. Tests (229) verified 2026-11-
   }
   ```
 - On subscribe the server sends the current state first, so reconnects are safe. Unknown job: send an error message, close with code 4404.
-- The `completed` message carries no result. Fetch it from `GET /api/jobs/{job_id}`, which returns `{job_id, status, progress, message, result}`.
+- The `completed` message carries no result. Fetch it from `GET /api/jobs/{job_id}`, which returns `{job_id, status, progress, message, result}`. While the job runs (`analyzing`, `synthesizing`) `result` is `{"partial": {quips, windows_done, total_windows, ready_until}}` once the first window's audio is done, otherwise null; `quips` have the final-result shape (scheduled, `audio_url` when ready), `windows_done` counts skipped windows, `ready_until` is the end time in seconds of the last finished window. `partial` is dropped when the job completes (the completed `result` has no `partial` key and is identical to the old all-at-end output) or fails (`result` stays null). Audio is synthesized per window in the background while later windows are analyzed.
 - Frontend listeners switch on `msg.status` only (never `msg.phase`, never fall back to `msg.message`).
 - `POST /api/jobs/{job_id}/export?captions=1|0` renders the mp4 and returns `{"url"}` for `GET /api/jobs/{job_id}/export.mp4`; errors are JSON `{"detail"}`.
 - `GET /api/jobs/{job_id}/video`: the job's prepared video (see Backend Rules), Range supported; 409 until the conversion step is done.

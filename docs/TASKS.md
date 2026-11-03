@@ -23,7 +23,7 @@ The goal is a better product for real users: lion dance teams turning performanc
 ## Phase 2: speed and robustness
 - 9B vs 35B-A3B throughput table (`FRAME_WIDTH` 640, `FRAMES_PER_WINDOW` 4, `WINDOW_SECONDS` 20, optionally `llama-server -np 2`).
 - Sequential crop sampling (done, session 23): the crop-box probe reads its 30 frames in one forward pass; 5.9 s to 1.8 s on hoco_40s.mp4. `sample_window_frames` (done, session 27) seeks once per window and reads forward: identical frames on hoco_40s.mp4 (24 frames), extraction 9.7 s to 5.3 s.
-- Progressive results (D4 option C).
+- Progressive results (D4 option C): done in session 28.
 - Phone clips (done, session 23): HEVC, other codecs OpenCV may not decode and clips with rotation metadata are transcoded to upright H.264 (session 27: as the job's first step, not in the upload request). Untested on a real phone clip. The player falls back to `GET /api/jobs/{id}/video` when the browser cannot decode the local file (session 27); untested with a real HEVC clip in a browser.
 - Export hardening (done, session 23): filter graph via `-filter_complex_script`, quip inputs as relative paths (300 quips tested), and the browser no longer buffers the mp4 (`POST /api/jobs/{id}/export` renders, then the download is a plain link).
 - Smaller items: Vitest tests for the VideoPlayer queue; show dropped quips as skipped; keep the volume setting while a clip ducks the video; offline TTS provider behind `TTS_PROVIDER` (D3).

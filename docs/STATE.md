@@ -62,7 +62,7 @@ The browser plays the file as a blob URL (the original, not the transcoded copy)
 - edge-tts must be >= 7.3.1 (7.2.8 gets 403).
 
 ## Known gaps for long clips
-The pipeline handles long clips by limits only. Not yet robust: results appear only at the end (progressive results, D4 option C, are planned), no resume after a page refresh. Skipped-window handling and the HTTP 400 fallback are covered by tests only, not run against a live server.
+The pipeline handles long clips by limits only. Not yet robust: finished quips appear while the job runs (`result.partial`, session 28; not run against live llama-server/edge-tts), no resume after a page refresh. Skipped-window handling and the HTTP 400 fallback are covered by tests only, not run against a live server.
 
 ## Verified live (2026-10-28, first run; numbers in docs/BENCHMARKS.md)
 Full pipeline over HTTP on Qwen3.5-9B with real edge-tts: 4 of 4 accepted jobs completed (4.8 s clip cold and warm, 40.2 s clip in 299 s), no audio overlap, no TTS failures, no shifts or drops. Found: about 1 in 3 model calls returned unusable JSON and was retried (fixed with the tolerant parser and constrained output, confirmed by the re-run with 0 retries); a 6 GB clip is rejected by the 2 GB cap. `backend/scripts/benchmark.py` reproduces this. Browser behavior and audio quality still not checked.
