@@ -1,3 +1,4 @@
+import mimetypes
 import os
 
 import cv2
@@ -412,6 +413,32 @@ async def test_conversion_is_the_first_job_step_and_reports_progress(upload_dir,
     async def cb(status, progress, message=None):
         steps.append((status, message))
 
-    duration = await pipeline_module.prepare_video(path, cb)
+    prepared = await pipeline_module.prepare_video(path, cb)
     assert steps == [("extracting", "Converting video")]
-    assert duration == pytest.approx(3.0, abs=0.3)
+    assert prepared.duration == pytest.approx(3.0, abs=0.3)
+    assert prepared.media_type == mimetypes.guess_type(path)[0]
+
+
+def test_job_video_is_served_with_range_support_from_the_job_only(client, upload_dir, fake_ai, video_bytes):
+    job_id = upload(client, video_bytes).json()["job_id"]
+    full = client.get(f"/api/jobs/{job_id}/video")
+    assert full.status_code == 200
+    assert full.content == video_bytes and full.headers["content-type"] == mimetypes.guess_type("clip.avi")[0]
+    assert full.headers["accept-ranges"] == "bytes"
+    part = client.get(f"/api/jobs/{job_id}/video", headers={"Range": "bytes=100-199"})
+    assert part.status_code == 206
+    assert part.content == video_bytes[100:200]
+    assert part.headers["content-range"] == f"bytes 100-199/{len(video_bytes)}"
+    assert str(upload_dir) not in str(part.headers)
+    assert client.get(f"/api/jobs/{job_id}/video", headers={"Range": "bytes=999999999-"}).status_code == 416
+
+
+def test_job_video_errors(client, upload_dir, fake_ai, video_bytes):
+    assert client.get("/api/jobs/nope/video").status_code == 404
+    job_store.create("x.avi", job_id="early")  # not prepared yet
+    assert client.get("/api/jobs/early/video").status_code == 409
+    del job_store._jobs["early"]  # an unfinished job would block the next upload
+    job_id = upload(client, video_bytes).json()["job_id"]
+    os.remove(upload_dir / "videos" / f"{job_id}_clip.avi")
+    assert client.get(f"/api/jobs/{job_id}/video").status_code == 404
+    assert client.get("/uploads/videos/anything.avi").status_code == 404  # raw uploads stay unreachable

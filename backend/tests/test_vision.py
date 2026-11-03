@@ -385,7 +385,7 @@ def two_windows(monkeypatch):
     monkeypatch.setattr(vp_, "sample_window_frames", lambda p, s, e, n, w, box=None: [{"timestamp": s, "image_data": "abc"}])
 
     async def no_prepare(path, progress_cb):  # the tests below write a placeholder file, not a real video
-        return 20.0
+        return pipeline_module.PreparedVideo(20.0, "video/x-msvideo")
 
     monkeypatch.setattr(pipeline_module, "prepare_video", no_prepare)
 

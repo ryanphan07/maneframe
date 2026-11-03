@@ -139,6 +139,9 @@ def test_job_stores_a_rotated_phone_clip_upright(tmp_path, monkeypatch):
     with TestClient(app) as client:
         resp = client.post("/api/upload", files={"file": ("phone.mp4", open(clip, "rb").read(), "video/mp4")})
         assert resp.status_code == 200, resp.text
-        assert client.get(f"/api/jobs/{resp.json()['job_id']}").json()["status"] == "completed"
+        job_id = resp.json()["job_id"]
+        assert client.get(f"/api/jobs/{job_id}").json()["status"] == "completed"
+        served = client.get(f"/api/jobs/{job_id}/video")
+        assert served.headers["content-type"] == "video/mp4" and "Video: h264" in probe(next((tmp_path / "videos").iterdir()))
     stored = next((tmp_path / "videos").iterdir())
     assert "rotation of" not in probe(stored) and frame_shape(str(stored)) == (W, H)

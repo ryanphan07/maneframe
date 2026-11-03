@@ -62,7 +62,7 @@ idle -> uploading -> extracting -> analyzing -> synthesizing -> completed
 - Any upload/processing failure must delete the job's temporary/uploaded files before raising or finishing.
 - Client-facing error messages are generic. Log details server-side with `logger.exception`. Never log base64 frame data or secrets.
 - Never trust client-supplied paths. The server owns all file paths. `job_id` is the `video_id` for storage (video, frames, audio).
-- Serve only the audio folder statically, never raw videos. Rendered mp4 exports are downloadable only through `GET /api/jobs/{job_id}/export.mp4`.
+- Serve only the audio folder statically; never mount the videos folder or expose a raw upload path. The one exception is `GET /api/jobs/{job_id}/video`: it serves the job's own prepared copy (converted to H.264 when needed, so not the untouched upload) with HTTP Range support, as a playback fallback for browsers that cannot decode the local file. The path comes from the job record, never from the request; the route answers 409 until the conversion step has finished. Rendered mp4 exports are downloadable only through `GET /api/jobs/{job_id}/export.mp4`.
 - The source video is kept after a successful job (mp4 export reads it) and deleted with the job: on failure or cancel immediately, on success when the job passes `JOB_TTL_SECONDS` (`pipeline.purge_expired_jobs`, run by the cleanup loop and before each upload). Rendered exports live in `uploads/exports/<job id>/` and go with the job.
 - Validation (filename sanitization, extension/size/duration limits, corruption checks) happens before a write is considered final.
 

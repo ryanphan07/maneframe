@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import mimetypes
 import os
 import re
 import shutil
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from app.config import settings
 from app.services.export import ExportError, forget_job_locks
@@ -96,13 +97,18 @@ def sweep_uploads() -> int:
     return removed
 
 
-async def prepare_video(video_path: str, progress_cb) -> float:
-    """First job step: make the upload readable (upright H.264 when needed), then check it. Returns the duration.
+class PreparedVideo(NamedTuple):
+    duration: float
+    media_type: str  # of the file at video_path after conversion
+
+
+async def prepare_video(video_path: str, progress_cb) -> PreparedVideo:
+    """First job step: make the upload readable (upright H.264 when needed), then check it.
     Raises VideoRejected for a corrupt, unconvertible or too long video."""
     await progress_cb("extracting", 2, "Converting video")
     try:
         readable = not await asyncio.to_thread(is_video_corrupt, video_path)
-        await normalize_video(video_path, readable)
+        converted = await normalize_video(video_path, readable)
     except ExportError:
         raise VideoRejected("The uploaded video could not be converted to a readable format.")
     if await asyncio.to_thread(is_video_corrupt, video_path):
@@ -113,7 +119,8 @@ async def prepare_video(video_path: str, progress_cb) -> float:
         raise VideoRejected(str(e))
     if duration > settings.MAX_VIDEO_SECONDS:
         raise VideoRejected(f"Video is too long. Maximum length is {settings.MAX_VIDEO_SECONDS:g} seconds.")
-    return duration
+    media_type = "video/mp4" if converted else mimetypes.guess_type(video_path)[0] or "application/octet-stream"
+    return PreparedVideo(duration, media_type)
 
 
 async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE) -> None:
@@ -127,7 +134,8 @@ async def run_pipeline(job_id: str, video_path: str, style: str = DEFAULT_STYLE)
             logger.warning("Progress update failed for job %s", job_id, exc_info=True)
 
     try:
-        await prepare_video(video_path, progress_cb)
+        prepared = await prepare_video(video_path, progress_cb)
+        job_store.set_video(job_id, prepared.duration, prepared.media_type)
         result = await process_video_commentary(video_path, job_id=job_id, progress_cb=progress_cb, style=style)
         job_store.complete(job_id, result)  # the source video stays until the job expires, for mp4 export
     except asyncio.CancelledError:

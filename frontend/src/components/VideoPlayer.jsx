@@ -3,6 +3,8 @@ import LabelPanel from './LabelPanel';
 
 const STALE_SECONDS = 4;
 const DUCKED_VOLUME = 0.3;
+// The server has converted the upload once it starts analyzing; before that GET /api/jobs/{id}/video answers 409.
+const SERVER_VIDEO_READY = ['analyzing', 'synthesizing', 'completed'];
 
 const formatTime = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
@@ -10,6 +12,8 @@ const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStat
   const videoRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [useServerCopy, setUseServerCopy] = useState(false);
+  const [playbackFailed, setPlaybackFailed] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -119,9 +123,36 @@ const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStat
 
   const isCompleted = processingStatus === 'completed';
 
+  // The browser cannot decode the local file (e.g. HEVC without hardware support): play the server's H.264 copy instead.
+  const serverReady = SERVER_VIDEO_READY.includes(processingStatus);
+  const src = useServerCopy ? (serverReady ? `${apiBase}/api/jobs/${jobId}/video` : undefined) : videoUrl;
+  const handlePlaybackProblem = () => {
+    if (!jobId) setPlaybackFailed(true);
+    else if (!useServerCopy) setUseServerCopy(true);
+    else if (serverReady) setPlaybackFailed(true);
+  };
+  const handleLoadedMetadata = (event) => {
+    if (event.currentTarget.videoWidth === 0) handlePlaybackProblem(); // audio only: no decodable frames
+  };
+
   return (
     <div>
-      <video ref={videoRef} src={videoUrl} controls style={{ maxWidth: '100%' }} />
+      <video
+        ref={videoRef}
+        src={src}
+        controls
+        style={{ maxWidth: '100%' }}
+        onError={handlePlaybackProblem}
+        onLoadedMetadata={handleLoadedMetadata}
+      />
+
+      {useServerCopy && !playbackFailed && !serverReady && (
+        <p role="status">Your browser cannot play this file directly. Converting it for playback…</p>
+      )}
+
+      {playbackFailed && (
+        <p role="alert" style={{ color: '#8a1c17' }}>This video could not be played in the browser.</p>
+      )}
 
       {audioBlocked && (
         <p role="status" style={{ color: '#8a6d00' }}>

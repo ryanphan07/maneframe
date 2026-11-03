@@ -61,7 +61,7 @@ VIDEO_DIR = os.path.join(settings.UPLOAD_DIR, "videos")
 AUDIO_DIR = os.path.join(settings.UPLOAD_DIR, "audio")
 os.makedirs(VIDEO_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
-# Only audio is served; videos are never exposed.
+# Only audio is served statically; a job's video is served only by GET /api/jobs/{id}/video.
 app.mount("/uploads/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
 
@@ -133,6 +133,21 @@ async def get_job(job_id: str):
         "message": job.message,
         "result": job.result.model_dump() if job.result else None,
     }
+
+
+@app.get("/api/jobs/{job_id}/video")
+async def job_video(job_id: str):
+    """The server's prepared copy of the job's video (H.264 when the upload needed converting), with Range support,
+    for browsers that cannot decode the local file. The path comes from the job, never from the client."""
+    try:
+        job = job_store.get(job_id)
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.video_media_type is None:
+        raise HTTPException(status_code=409, detail="The video is still being prepared.")
+    if not os.path.isfile(job.video_path):
+        raise HTTPException(status_code=404, detail="The video is no longer available.")
+    return FileResponse(job.video_path, media_type=job.video_media_type)
 
 
 async def _rendered_export(job_id: str, captions: bool) -> str:

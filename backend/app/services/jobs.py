@@ -32,6 +32,8 @@ class Job(BaseModel):
     progress: int = 0
     message: Optional[str] = None
     result: Optional[CommentaryResponse] = None
+    duration: Optional[float] = None  # set with video_media_type once the video is prepared
+    video_media_type: Optional[str] = None  # None until the converted copy at video_path is ready to serve
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
 
@@ -63,6 +65,11 @@ class JobStore:
         self._jobs[job_id] = job
         logger.info(f"Created job {job_id}")
         return job
+
+    def set_video(self, job_id: str, duration: float, media_type: str) -> None:
+        job = self.get(job_id)
+        job.duration = duration
+        job.video_media_type = media_type
 
     def get(self, job_id: str) -> Job:
         if job_id not in self._jobs:
