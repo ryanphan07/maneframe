@@ -8,16 +8,22 @@ const SERVER_VIDEO_READY = ['analyzing', 'synthesizing', 'completed'];
 
 const formatTime = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
-const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 } }) => {
+const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, readyUntil = null, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 } }) => {
   const videoRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [useServerCopy, setUseServerCopy] = useState(false);
   const [playbackFailed, setPlaybackFailed] = useState(false);
+  // Quips grow while the job runs. The playback effect reads them from a ref so a refresh does not cut the clip
+  // that is playing or replay quips that already played.
+  const quipsRef = useRef(commentaryQuips);
+  useEffect(() => {
+    quipsRef.current = commentaryQuips;
+  }, [commentaryQuips]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !commentaryQuips.length) return;
+    if (!video) return;
 
     let queue = [];
     let played = new Set();
@@ -77,11 +83,12 @@ const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStat
     const handleTimeUpdate = () => {
       const t = video.currentTime;
       let active = -1;
-      commentaryQuips.forEach((quip, i) => {
+      quipsRef.current.forEach((quip, i) => {
         if (quip.timestamp > t) return;
         active = i;
-        if (played.has(i)) return;
-        played.add(i);
+        const key = `${quip.timestamp}|${quip.text}`;
+        if (played.has(key)) return;
+        played.add(key);
         if (quip.audio_url && t - quip.timestamp <= STALE_SECONDS) queue.push(quip);
       });
       setActiveIndex(active);
@@ -115,7 +122,7 @@ const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStat
       video.removeEventListener('ended', stopAll);
       stopAll();
     };
-  }, [commentaryQuips]);
+  }, []);
 
   const seekTo = (timestamp) => {
     if (videoRef.current) videoRef.current.currentTime = timestamp;
@@ -173,10 +180,14 @@ const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, processingStat
         </p>
       )}
 
-      {isCompleted && (
+      {!isCompleted && readyUntil > 0 && commentaryQuips.length > 0 && (
+        <p role="status">Commentary ready up to {formatTime(readyUntil)}. You can play the video while the rest is processed.</p>
+      )}
+
+      {(isCompleted || commentaryQuips.length > 0) && (
         <div className="commentary-display" style={{ marginTop: '1rem' }}>
           <h3>Commentary</h3>
-          {commentaryQuips.length === 0 && <p>No commentary was generated.</p>}
+          {isCompleted && commentaryQuips.length === 0 && <p>No commentary was generated.</p>}
           {commentaryQuips.map((quip, index) => (
             <div
               key={index}

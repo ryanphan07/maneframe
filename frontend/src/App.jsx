@@ -10,6 +10,7 @@ const WS_BASE = API_BASE.replace(/^http/, 'ws');
 const MAX_RECONNECTS = 5;
 const MAX_BACKOFF_MS = 10000;
 const POLL_INTERVAL_MS = 5000;
+const PARTIAL_FETCH_INTERVAL_MS = 2000;
 const MAX_POLL_FAILURES = 60; // about 5 minutes without reaching the server
 
 const styleLabel = (value) => value.charAt(0).toUpperCase() + value.slice(1);
@@ -33,6 +34,7 @@ const exportFileName = (originalName) => `maneframe_${originalName.replace(/\.[^
 function App() {
   const [commentaryQuips, setCommentaryQuips] = useState([]);
   const [audioAvailable, setAudioAvailable] = useState(true);
+  const [readyUntil, setReadyUntil] = useState(null);
   const [skipped, setSkipped] = useState({ ranges: [], total: 0 });
   const [videoUrl, setVideoUrl] = useState(null);
   const [processingStatus, setProcessingStatus] = useState('idle');
@@ -53,6 +55,7 @@ function App() {
   const terminalRef = useRef(false);
   const closedRef = useRef(false);
   const objectUrlRef = useRef(null);
+  const lastPartialFetchRef = useRef(0);
 
   const teardownSocket = useCallback(() => {
     closedRef.current = true;
@@ -71,14 +74,33 @@ function App() {
   const fail = useCallback((message) => {
     terminalRef.current = true;
     setProcessingStatus('error');
+    setCommentaryQuips([]); // unfinished commentary is never left on screen as if it were a result
+    setReadyUntil(null);
     setErrorMessage(message);
     toast.error(message, { position: 'top-right' });
+  }, []);
+
+  // While the job runs the server returns {partial: {quips, ready_until, ...}}: show the finished quips so far.
+  const fetchPartial = useCallback(async (jobId) => {
+    const now = Date.now();
+    if (now - lastPartialFetchRef.current < PARTIAL_FETCH_INTERVAL_MS) return;
+    lastPartialFetchRef.current = now;
+    try {
+      const { data } = await axios.get(`${API_BASE}/api/jobs/${jobId}`);
+      const partial = data.result?.partial;
+      if (jobIdRef.current !== jobId || terminalRef.current || data.status === 'completed' || data.status === 'error' || !partial) return;
+      setCommentaryQuips(Array.isArray(partial.quips) ? partial.quips : []);
+      setReadyUntil(partial.ready_until || 0);
+    } catch {
+      // the next progress message tries again; the final fetch reports real failures
+    }
   }, []);
 
   const fetchResult = useCallback(async (jobId) => {
     try {
       const { data } = await axios.get(`${API_BASE}/api/jobs/${jobId}`);
       if (jobIdRef.current !== jobId) return;
+      setReadyUntil(null);
       setCommentaryQuips(Array.isArray(data.result?.quips) ? data.result.quips : []);
       setAudioAvailable(data.result?.audio_available !== false);
       setSkipped({
@@ -115,6 +137,10 @@ function App() {
         setProcessingStatus(data.status);
         setProgress(data.progress ?? 0);
         setStatusMessage(data.message || '');
+        if (data.result?.partial) {
+          setCommentaryQuips(data.result.partial.quips || []);
+          setReadyUntil(data.result.partial.ready_until || 0);
+        }
       } catch (error) {
         if (error?.response?.status === 404) {
           fail('The server no longer has this job (it may have restarted).');
@@ -155,6 +181,7 @@ function App() {
           setProcessingStatus(msg.status);
           setProgress(msg.progress ?? 0);
           setStatusMessage(msg.message || '');
+          if (msg.status === 'analyzing' || msg.status === 'synthesizing') fetchPartial(jobId);
         }
       };
 
@@ -173,7 +200,7 @@ function App() {
       };
     };
     open();
-  }, [fail, fetchResult, startPolling]);
+  }, [fail, fetchPartial, fetchResult, startPolling]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,6 +234,8 @@ function App() {
     terminalRef.current = false;
     attemptsRef.current = 0;
     setCommentaryQuips([]);
+    setReadyUntil(null);
+    lastPartialFetchRef.current = 0;
     setAudioAvailable(true);
     setSkipped({ ranges: [], total: 0 });
     setErrorMessage('');
@@ -335,6 +364,7 @@ function App() {
               jobId={exportJob?.jobId}
               apiBase={API_BASE}
               commentaryQuips={commentaryQuips}
+              readyUntil={readyUntil}
               audioAvailable={audioAvailable}
               skipped={skipped}
               processingStatus={processingStatus}
