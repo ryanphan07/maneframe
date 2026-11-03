@@ -36,20 +36,31 @@ Key design points:
 
 ## Quickstart (PowerShell, from the repo root)
 
+One command, after the one-time setup:
+
+```powershell
+# One-time setup
+cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements.txt; cd ..
+copy backend\.env.example backend\.env   # then set LLAMA_SERVER_PATH, LLM_MODEL_PATH and LLM_MMPROJ_PATH (and LLM_CTX if needed)
+
+.\start.ps1
+```
+`start.ps1` checks the venv, ffmpeg and the frontend build (it builds the frontend if `frontend\dist` is missing), starts llama-server only if `/health` does not answer (log in `logs\`), waits for it, starts the backend on port 8000 (which also serves the built frontend) and opens http://localhost:8000. Ctrl+C stops only the processes the script started; a llama-server that was already running is left alone.
+
+Manual path (run the pieces yourself; `npm run dev` gives hot reload on port 5173):
+
 ```powershell
 # 1. LLM (separate terminal; adjust paths)
 llama-server -m <model.gguf> --mmproj <mmproj-F16.gguf> -c 32768 -np 1 -ngl 99 --port 8080 --jinja
 
-# 2. Backend (first time: create the venv and install)
-cd backend
-python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements.txt   # add requirements-dev.txt to run tests
-copy .env.example .env      # optional; every value shown is the default
-uvicorn app.main:app --port 8000
+# 2. Backend
+cd backend; venv\Scripts\Activate.ps1
+uvicorn app.main:app --port 8000          # also serves frontend\dist at http://localhost:8000 when it is built
 
-# 3. Frontend (another terminal)
+# 3. Frontend dev server (another terminal; optional)
 cd frontend; npm install; npm run dev     # http://localhost:5173
 ```
-Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 min and 2 GB by default, see `MAX_VIDEO_SECONDS`/`MAX_UPLOAD_MB`), wait for the progress bar, press play. When it finishes, "Download video" renders a shareable mp4 (H.264 + AAC, original size, optional captions). Expect minutes of processing: on Qwen3.5-9B a 40 s clip took about 4 minutes (see Benchmarks). Short clips are the supported demo; 40 s is the longest clip measured.
+Open the app, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 min and 2 GB by default, see `MAX_VIDEO_SECONDS`/`MAX_UPLOAD_MB`), wait for the progress bar, press play. When it finishes, "Download video" renders a shareable mp4 (H.264 + AAC, original size, optional captions). Expect minutes of processing: on Qwen3.5-9B a 40 s clip took about 4 minutes (see Benchmarks). Short clips are the supported demo; 40 s is the longest clip measured.
 
 ## API
 
@@ -74,6 +85,7 @@ Open http://localhost:5173, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 mi
 | Setting | Default | Meaning |
 |---|---|---|
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TIMEOUT`, `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`, `LLM_ENABLE_THINKING`, `LLM_JSON_SCHEMA` | `http://127.0.0.1:8080/v1`, local, 300 s, 500, 0.8, false, true | LLM endpoint and limits |
+| `LLAMA_SERVER_PATH`, `LLM_MODEL_PATH`, `LLM_MMPROJ_PATH`, `LLM_CTX` | empty, empty, empty, 8192 | Used by `start.ps1` only, to launch llama-server when nothing answers at `LLM_BASE_URL` |
 | `WINDOW_SECONDS`, `FRAMES_PER_WINDOW`, `FRAME_WIDTH` | 10, 6, 896 | Vision windowing |
 | `MAX_QUIPS_PER_WINDOW`, `MIN_QUIP_GAP_SEC` | 3, 4.5 | Quip budget (4.5 s is about the speech time of an 8-word line) |
 | `TTS_VOICE`, `TTS_RATE`, `TTS_TIMEOUT_SECONDS`, `TTS_CONCURRENCY`, `TTS_RETRIES`, `TTS_RETRY_DELAY_SECONDS`, `TTS_ENABLED` | en-US-GuyNeural, +10%, 30, 1, 1, 1, true | Speech |

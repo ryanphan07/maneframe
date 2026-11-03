@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 500
     LLM_JSON_SCHEMA: bool = True  # send response_format with a JSON schema (constrained output)
     LLM_TEMPERATURE: float = 0.8
+    # Used by start.ps1 only (the backend never launches the model): where llama-server lives and what it loads
+    LLAMA_SERVER_PATH: str = ""  # empty: llama-server from PATH
+    LLM_MODEL_PATH: str = ""
+    LLM_MMPROJ_PATH: str = ""
+    LLM_CTX: int = 8192  # llama-server -c; the prompts need about 3600 tokens per call
 
     WINDOW_SECONDS: float = 10.0
     FRAMES_PER_WINDOW: int = 6

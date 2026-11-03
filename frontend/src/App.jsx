@@ -4,8 +4,9 @@ import VideoPlayer from './components/VideoPlayer';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-const WS_BASE = API_BASE.replace(/^http/, 'ws');
+// VITE_API_BASE wins; otherwise `npm run dev` talks to the backend on :8000 and a build served by the backend is same-origin.
+const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? 'http://localhost:8000' : '');
+const WS_BASE = (API_BASE || window.location.origin).replace(/^http/, 'ws');
 
 const MAX_RECONNECTS = 5;
 const MAX_BACKOFF_MS = 10000;
@@ -278,7 +279,7 @@ function App() {
         params: { captions: captions ? 1 : 0 },
       });
       const link = document.createElement('a');
-      link.href = new URL(data.url, API_BASE).href;
+      link.href = new URL(data.url, API_BASE || window.location.origin).href;
       link.download = exportJob.fileName;
       document.body.appendChild(link);
       link.click();

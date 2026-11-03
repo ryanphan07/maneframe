@@ -301,3 +301,18 @@ async def websocket_endpoint(websocket: WebSocket, job_id: str):
             if task is not None and not task.done():
                 task.cancel()
         job_store.unsubscribe(job_id, queue)
+
+
+FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+
+
+def mount_frontend(target: FastAPI, dist_dir: str) -> bool:
+    """Serve the built frontend at / when dist_dir exists. Must run after every route is registered: the mount
+    matches all paths, so the API, WebSocket and audio routes registered before it still win."""
+    if not os.path.isfile(os.path.join(dist_dir, "index.html")):
+        return False
+    target.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
+    return True
+
+
+mount_frontend(app, FRONTEND_DIST)

@@ -35,3 +35,6 @@ data/
 # Local commentary eval inputs and results
 eval/clips.txt
 eval/results/
+
+# start.ps1 logs
+logs/
