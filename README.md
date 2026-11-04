@@ -82,8 +82,8 @@ Then put `TTS_ENGINE=piper` in `backend/.env` and restart. The voice (two files,
 
 | Route | Purpose |
 |---|---|
-| `GET /api/styles` | `{styles: [...], default}`: the files in `prompts/styles/` (the values `style` accepts) |
-| `POST /api/upload` (multipart `file`, optional form field `style`) | Checks the name, extension and size, saves the clip and starts a job; returns `{job_id, filename}` without reading the video. `style` must be one of `GET /api/styles`, else 400. 400 `{"detail": ...}` on bad input. Conversion to upright H.264 (when needed), the corruption check and the length limit are the job's first step (status `extracting`, message `Converting video`); a clip that fails them ends the job in `error` with the reason |
+| `GET /api/styles` | `{styles: [...], default, max_upload_mb}`: the files in `prompts/styles/` (the values `style` accepts) and the upload limit |
+| `POST /api/upload` (multipart `file`, optional form field `style`) | Checks the name, extension and size, saves the clip and starts a job; returns `{job_id, filename}` without reading the video. `style` must be one of `GET /api/styles`, else 400. 400 `{"detail": ...}` on bad input; 413 when `Content-Length` shows the file is over `MAX_UPLOAD_MB` (the web app also checks before uploading). Conversion to upright H.264 (when needed), the corruption check and the length limit are the job's first step (status `extracting`, message `Converting video`); a clip that fails them ends the job in `error` with the reason |
 | `GET /api/jobs/{job_id}` | `{job_id, status, progress, message, result}`; `result` is `{quips: [{timestamp, text, audio_url, duration_sec}], audio_available, style, ...}` once completed; while running `{partial: {quips, windows_done, total_windows, ready_until}}` or null (finished quips so far, never shown as complete). 404 if unknown |
 | `WS /ws/analyze/{job_id}` | Server to client only: `{status, progress, message?}` with status in `uploading, extracting, analyzing, synthesizing, completed, error`. Sends the current state first, closes after a terminal state; unknown job closes with 4404 |
 | `POST /api/jobs/{job_id}/export?captions=1` | Renders the mp4 (same rules and errors as the GET below, errors as JSON) and returns `{"url": "/api/jobs/{id}/export.mp4?captions=1"}`; the web app calls this first, then downloads from the URL so the file is never held in browser memory |
@@ -117,7 +117,7 @@ Then put `TTS_ENGINE=piper` in `backend/.env` and restart. The voice (two files,
 
 The system prompt is `backend/app/prompts/commentary_system.txt` plus `lion_dance_glossary.txt` (marked DRAFT until reviewed), an optional `examples.txt` (added only when it has real examples) and the chosen style from `prompts/styles/*.txt`. Restart the backend after editing. Each window also gets the last two windows' summaries and recent quips as earlier context.
 
-To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python scripts/eval_commentary.py --styles hype,deadpan` from `backend/` (LLM step only; needs llama-server), rate the rows in `eval/results/<timestamp>.csv`, then `python scripts/eval_commentary.py --summarize` prints the mean rating per prompt hash and style.
+To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python scripts/eval_commentary.py --styles hype,deadpan` from `backend/` (LLM step only; needs llama-server), rate the rows in `eval/results/<timestamp>.csv`, (add `--prepared-dir <folder>` for HEVC/HDR phone clips so they are converted like a job's), then `python scripts/eval_commentary.py --summarize` prints the mean rating per prompt hash and style.
 
 ## Tests
 
