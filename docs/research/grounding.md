@@ -96,3 +96,25 @@ Examples:
 - 04_action t=7.5, a: "Scrolls drop! Bears versus Cal. It's a rivalry show!" no, inv (the scrolls are already unfurled in the first frame).
 - 05_ending t=36.1, a: "Empty stage. Loud drums. The California vibe stays." no, inv (empty and silent: no drummers on stage).
 - 03_close t=11.5, a: "Pink lion enters the pit, ready to pounce!" no, inv.
+
+## Arm b: two-step facts (`--facts`, commentary prompt unchanged, hash e8695b3d)
+Per window, a first call (the same frames, schema-constrained, temperature 0.2) returns for each frame the lions as closed-enum strings ("blue left crouched": color, left/center/right, pose; 60 values) and whether drummers are visible; `format_facts` turns that into one line per frame and `llm.analyze_window(..., facts=...)` appends it to the commentary call's intro text. Eval-only (`--facts`); the job API is unchanged. A first schema with one object per lion (817 completion tokens) was too slow and was replaced by the compact enum one before any run. Prompt tokens per window: facts call 1951, commentary call about 3287 (arm r: 3253), completion tokens 217 + 124.
+
+Pool: both runs plus 15 random lines from each baseline run (drift check: 15 of 30 yes = 50%, against 45% for the full blind baseline; with arm a's sample the two checks give 40% and 50%, so the rubric held within noise).
+
+| | lines | yes | no | unclear | grounded (Wilson 95%) | s/window |
+|---|---|---|---|---|---|---|
+| b run 1 | 59 | 37 | 9 | 13 | 63% (50-74) | 66.5 |
+| b run 2 | 60 | 31 | 9 | 20 | 52% (39-64) | 99.6 |
+| b pooled | 119 | 68 | 18 | 33 | 57% (48-66) | 83.1 |
+
+Failure types, baseline pooled (119) vs b pooled (119): inv 16 vs 19, pose 20 vs 8, face 19 vs 9, who 6 vs 9, unread 4 vs 6.
+
+Verdict: **not a winner, reverted** (nothing to revert: flag only, defaults unchanged). It fails both parts of the rule. Grounding: +18 points on run 1 but +7 on run 2, so not >= 10 on each run. Time: 66.5 and 99.6 s per window against about 32 s (arm r's 31-34 s, used as the baseline proxy), 2.0x and 3.1x, over the 1.5x limit (about 49 s). Run 2 was 50% slower than run 1 with identical token counts in both calls (1951 / 3285-3289), so that gap is machine load on the host (other work was running; not measured), but run 1 alone is already over the limit, so it does not change the verdict.
+What it did: pose errors fell from 20 to 8 and face claims from 19 to 9, which is the direction the facts call was meant to push. Invented events did not fall (19 vs 16) and wrong-lion/wrong-time errors rose (9 vs 6): the commentary call takes the facts at face value but the lines are often one beat late ("drops" when the lion is already down).
+Worth a later look: the pooled gain is +12 points (57% vs 45%) but the intervals overlap (48-66 vs 37-54), so on this evidence it is not even a clear grounding gain, and it costs 2.6x the time per window.
+
+Examples:
+- 04_action t=7.5, b: "Scrolls unfurl! Pink says BEARS. Yellow has red. Blue spells CAL. Stage is lit!" yes.
+- 04_action t=0.8, b: "Pink on the left, low to the ground. Blue on the right, also crouched. Yellow center is standing tall." yes (every position and pose matches).
+- 03_close t=20.8, b: "Pink and yellow holding the low horse stance. Discipline." no, pose (pink is upright at t).
