@@ -4,6 +4,7 @@ Run from backend/ with the venv active and llama-server up:
     python scripts/eval_commentary.py --styles hype,deadpan
 Clips are listed one path per line in eval/clips.txt (blank lines and # comments are ignored). Each run writes
 eval/results/<timestamp>.csv with one row per quip: clip, window, t, style, prompt_hash, text, rating (blank).
+Pass --prepared-dir <folder> to run the clips through the app's prepare step first (needed for HEVC/HDR phone clips).
 Fill in the rating column (any number, e.g. 1-5) by hand, then:
     python scripts/eval_commentary.py --summarize [file.csv ...]
 prints the mean rating per prompt_hash and style over the rated rows (all of eval/results when no file is given).
@@ -69,6 +70,31 @@ def read_rows(paths: List[Path]) -> List[Dict[str, str]]:
     return rows
 
 
+async def prepare_clip(clip: str, prepared_dir: Path) -> str:
+    """A job-ready copy of the clip (upright SDR H.264, as the app makes it) in prepared_dir, cached by file name.
+    The eval then sees the same frames a real job does, not raw HDR HEVC. Delete the cached file to redo it."""
+    import shutil
+
+    from app.services.pipeline import prepare_video
+
+    target = prepared_dir / Path(clip).name
+    if target.exists():
+        return str(target)
+    prepared_dir.mkdir(parents=True, exist_ok=True)
+    partial = prepared_dir / (Path(clip).name + ".part")
+    await asyncio.to_thread(shutil.copyfile, clip, partial)
+
+    async def quiet(*_args) -> None:
+        return None
+
+    try:
+        await prepare_video(str(partial), quiet)
+        partial.replace(target)
+    finally:
+        partial.unlink(missing_ok=True)
+    return str(target)
+
+
 async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Optional[int]) -> List[Dict[str, object]]:
     """The LLM step of the pipeline for one clip and style (same windows, frames and continuity), one row per quip."""
     from app.config import settings
@@ -102,7 +128,7 @@ async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Option
     return rows
 
 
-async def run_eval(clips: List[str], styles: List[str], max_windows: Optional[int], out_dir: Path) -> Path:
+async def run_eval(clips: List[str], styles: List[str], max_windows: Optional[int], out_dir: Path, prepared_dir: Optional[Path] = None) -> Path:
     from app.services import llm
 
     known = llm.list_styles()
@@ -116,6 +142,9 @@ async def run_eval(clips: List[str], styles: List[str], max_windows: Optional[in
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
         for clip in clips:
+            if prepared_dir is not None:
+                print(f"  preparing {Path(clip).name}", flush=True)
+                clip = await prepare_clip(clip, prepared_dir)
             for style in styles:
                 rows = await eval_clip(clip, style, llm.prompt_hash(style), max_windows)
                 writer.writerows(rows)
@@ -131,6 +160,7 @@ def main() -> int:
     parser.add_argument("--clip", action="append", help="a clip path to use instead of the clips file (repeatable)")
     parser.add_argument("--styles", default="hype", help="comma-separated styles (default: hype)")
     parser.add_argument("--max-windows", type=int, help="only the first N windows of each clip")
+    parser.add_argument("--prepared-dir", type=Path, help="convert each clip like a job does (HEVC/HDR/rotation to upright SDR H.264) into this folder first and evaluate that copy; cached by file name")
     parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--summarize", nargs="*", type=Path, metavar="CSV", help="print mean rating per prompt_hash and style")
     args = parser.parse_args()
@@ -149,7 +179,7 @@ def main() -> int:
         print(f"Clip not found: {missing[0]}", file=sys.stderr)
         return 2
     styles = [s.strip() for s in args.styles.split(",") if s.strip()]
-    asyncio.run(run_eval(clips, styles, args.max_windows, args.out_dir))
+    asyncio.run(run_eval(clips, styles, args.max_windows, args.out_dir, args.prepared_dir))
     return 0
 
 

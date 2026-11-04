@@ -48,3 +48,25 @@ def test_summarize_reads_rated_csv_files(tmp_path):
         encoding="utf-8",
     )
     assert ev.summarize(ev.read_rows([path])) == [{"prompt_hash": "aaaa1111", "style": "hype", "n": 1, "mean": 4.0}]
+
+
+def test_prepare_clip_converts_a_copy_once_and_caches_it(tmp_path, monkeypatch):
+    import asyncio
+
+    from app.services import pipeline
+
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"original")
+    calls = []
+
+    async def fake_prepare(path, progress_cb):
+        calls.append(path)
+        Path(path).write_bytes(b"converted")
+
+    monkeypatch.setattr(pipeline, "prepare_video", fake_prepare)
+    out = tmp_path / "prepared"
+    first = asyncio.run(ev.prepare_clip(str(src), out))
+    second = asyncio.run(ev.prepare_clip(str(src), out))
+    assert first == second == str(out / "clip.mp4")
+    assert Path(first).read_bytes() == b"converted" and src.read_bytes() == b"original"
+    assert len(calls) == 1 and not list(out.glob("*.part"))
