@@ -200,9 +200,13 @@ def build_messages(
     nudge: bool = False,
     earlier_seen: Optional[List[str]] = None,
     style: str = DEFAULT_STYLE,
+    facts: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """System prompt first, the images last, so the server can reuse its prefix cache."""
+    """System prompt first, the images last, so the server can reuse its prefix cache. `facts` (eval only, default
+    None) is extra text about what the frames show, added before the images."""
     intro = f"These frames cover {start:.1f}s to {end:.1f}s of the video."
+    if facts:
+        intro += " " + facts
     if earlier_seen:
         intro += (
             " Earlier context, from the windows just before this one (oldest first; it is not in these frames, "
@@ -267,6 +271,7 @@ async def analyze_window(
     label: str = "window",
     earlier_seen: Optional[List[str]] = None,
     style: str = DEFAULT_STYLE,
+    facts: Optional[str] = None,
 ) -> WindowResult:
     """One LLM call for one window. Retries once with a JSON nudge if the reply is unusable.
 
@@ -277,7 +282,7 @@ async def analyze_window(
     previous_quips = previous_quips or []
     last_error: Optional[Exception] = None
     for attempt in range(2):
-        messages = build_messages(frames, start, end, previous_quips, nudge=attempt > 0, earlier_seen=earlier_seen, style=style)
+        messages = build_messages(frames, start, end, previous_quips, nudge=attempt > 0, earlier_seen=earlier_seen, style=style, facts=facts)
         reply = await _call(messages, len(frames), label)
         try:
             objects = parse_model_objects(reply)
