@@ -6,7 +6,7 @@ import shutil
 import uuid
 from typing import NamedTuple, Optional
 
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -58,6 +58,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+UPLOAD_OVERHEAD_BYTES = 1024 * 1024  # multipart framing and the style field on top of the file itself
+
+
+@app.middleware("http")
+async def reject_oversized_upload(request: Request, call_next):
+    """Refuse a too-large upload from Content-Length before the body is read (FastAPI would otherwise spool the whole file first).
+    validate_upload_metadata stays as the backstop for clients that send no Content-Length."""
+    if request.method == "POST" and request.url.path == "/api/upload":
+        try:
+            declared = int(request.headers.get("content-length", ""))
+        except ValueError:
+            declared = None
+        if declared is not None and declared > settings.MAX_UPLOAD_MB * 1024 * 1024 + UPLOAD_OVERHEAD_BYTES:
+            return JSONResponse(status_code=413, content={"detail": f"File size exceeds the maximum limit of {settings.MAX_UPLOAD_MB}MB."})
+    return await call_next(request)
+
+
 VIDEO_DIR = os.path.join(settings.UPLOAD_DIR, "videos")
 AUDIO_DIR = os.path.join(settings.UPLOAD_DIR, "audio")
 os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -75,7 +92,7 @@ async def global_exception_handler(_, exc: Exception):
 @app.get("/api/styles")
 async def list_styles():
     """The commentary styles the server has prompts for (the files in prompts/styles/)."""
-    return {"styles": llm_service.list_styles(), "default": llm_service.DEFAULT_STYLE}
+    return {"styles": llm_service.list_styles(), "default": llm_service.DEFAULT_STYLE, "max_upload_mb": settings.MAX_UPLOAD_MB}
 
 
 @app.post("/api/upload")

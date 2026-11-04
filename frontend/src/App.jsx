@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import { uploadSizeError } from './uploadLimit';
 import VideoPlayer from './components/VideoPlayer';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -47,6 +48,7 @@ function App() {
   const [rendering, setRendering] = useState(false);
   const [styles, setStyles] = useState([]);
   const [style, setStyle] = useState('');
+  const [maxUploadMb, setMaxUploadMb] = useState(null);
 
   const socketRef = useRef(null);
   const reconnectTimerRef = useRef(null);
@@ -209,6 +211,7 @@ function App() {
       if (cancelled) return;
       setStyles(data.styles);
       setStyle(data.default);
+      setMaxUploadMb(data.max_upload_mb ?? null);
     }).catch((error) => {
       if (!cancelled) toast.error(errorDetail(error, 'Could not load the commentary styles. Is the server running?'), { position: 'top-right' });
     });
@@ -229,6 +232,13 @@ function App() {
     const input = event.target;
     const file = input.files[0];
     if (!file) return;
+
+    const tooBig = uploadSizeError(file.size, maxUploadMb);
+    if (tooBig) { // rejected before any upload; a job already on screen is left alone
+      toast.error(tooBig, { position: 'top-right' });
+      input.value = '';
+      return;
+    }
 
     teardownSocket();
     jobIdRef.current = null;

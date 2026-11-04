@@ -56,6 +56,30 @@ describe('style dropdown', () => {
   });
 });
 
+describe('upload size limit', () => {
+  const pick = (container, file) => fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
+
+  it('rejects an oversized clip before uploading', async () => {
+    axios.get.mockResolvedValue({ data: { ...stylesResponse.data, max_upload_mb: 2048 } });
+    const { container } = render(<App />);
+    await waitFor(() => expect(screen.getByLabelText('Commentary style')).toHaveValue('hype'));
+    const big = new File(['x'], 'big.mp4', { type: 'video/mp4' });
+    Object.defineProperty(big, 'size', { value: 3 * 1024 ** 3 });
+    pick(container, big);
+    expect(toast.error).toHaveBeenCalledWith('This clip is 3 GB; the limit is 2 GB. Trim it on your phone first.', { position: 'top-right' });
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
+  it('uploads a clip under the limit', async () => {
+    axios.get.mockResolvedValue({ data: { ...stylesResponse.data, max_upload_mb: 2048 } });
+    axios.post.mockResolvedValue({ data: { job_id: 'j1' } });
+    const { container } = render(<App />);
+    await waitFor(() => expect(screen.getByLabelText('Commentary style')).toHaveValue('hype'));
+    pick(container, new File(['x'], 'ok.mp4', { type: 'video/mp4' }));
+    await waitFor(() => expect(axios.post).toHaveBeenCalled());
+  });
+});
+
 describe('progressive results', () => {
   const jobGets = (...responses) => {
     const queue = [...responses];

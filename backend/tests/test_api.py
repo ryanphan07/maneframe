@@ -442,3 +442,28 @@ def test_job_video_errors(client, upload_dir, fake_ai, video_bytes):
     os.remove(upload_dir / "videos" / f"{job_id}_clip.avi")
     assert client.get(f"/api/jobs/{job_id}/video").status_code == 404
     assert client.get("/uploads/videos/anything.avi").status_code == 404  # raw uploads stay unreachable
+
+
+def test_styles_reports_the_upload_limit(client, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 7)
+    assert client.get("/api/styles").json()["max_upload_mb"] == 7
+
+
+def test_upload_rejected_early_from_content_length(client, monkeypatch, upload_dir):
+    """413 comes from the header alone: the route never runs, so nothing is saved and no job exists."""
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 1)
+    ran = []
+    monkeypatch.setattr(main_module, "run_pipeline", lambda *a, **k: ran.append(1))
+    resp = client.post("/api/upload", content=b"x" * 10, headers={"content-length": str(5 * 1024 * 1024), "content-type": "multipart/form-data; boundary=b"})
+    assert resp.status_code == 413
+    assert "1MB" in resp.json()["detail"]
+    assert os.listdir(upload_dir / "videos") == [] and not ran and not job_store._jobs
+
+
+def test_upload_just_over_the_limit_still_reaches_the_backstop(client, monkeypatch, video_bytes):
+    """Multipart framing makes the body a little larger than the file; only the post-parse check judges the file itself."""
+    monkeypatch.setattr(settings, "MAX_UPLOAD_MB", 1)
+    big = video_bytes + bytes(1) * (1024 * 1024)
+    resp = upload(client, big)
+    assert resp.status_code == 400
+    assert "1MB" in resp.json()["detail"]

@@ -155,5 +155,5 @@ def test_styles_route_lists_the_prompt_files():
     with TestClient(app) as client:
         resp = client.get("/api/styles")
     assert resp.status_code == 200
-    assert resp.json() == {"styles": llm_module.list_styles(), "default": llm_module.DEFAULT_STYLE}
+    assert resp.json() == {"styles": llm_module.list_styles(), "default": llm_module.DEFAULT_STYLE, "max_upload_mb": settings.MAX_UPLOAD_MB}
     assert {"hype", "deadpan", "broadcast"} <= set(resp.json()["styles"])
