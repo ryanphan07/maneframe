@@ -118,3 +118,32 @@ Examples:
 - 04_action t=7.5, b: "Scrolls unfurl! Pink says BEARS. Yellow has red. Blue spells CAL. Stage is lit!" yes.
 - 04_action t=0.8, b: "Pink on the left, low to the ground. Blue on the right, also crouched. Yellow center is standing tall." yes (every position and pose matches).
 - 03_close t=20.8, b: "Pink and yellow holding the low horse stance. Discipline." no, pose (pink is upright at t).
+
+## Arm c: Qwen3.5-9B vs Qwen3.6-35B (default config, hash e8695b3d)
+No arm won, so "best of r/a/b" is the unchanged default; arm c is the 9B (Qwen3.5-9B-Q4_K_M + mmproj-Qwen3.5-9B-F16, llama-server restarted with `-c 8192 -np 1 -ngl 99 --jinja`) against the 35B baseline on the same prompt and frames (6 frames at 896 px). Prompt tokens per call about 3100, completion about 127.
+
+Pool: both 9B runs plus 15 random lines from each baseline run (drift check: 14 of 30 yes = 47%, against 45% for the full blind baseline).
+
+| | lines | yes | no | unclear | grounded (Wilson 95%) | s/window |
+|---|---|---|---|---|---|---|
+| c run 1 | 56 | 22 | 9 | 25 | 39% (28-52) | 50.4 |
+| c run 2 | 58 | 25 | 8 | 25 | 43% (31-56) | 48.1 |
+| c pooled | 114 | 47 | 17 | 50 | 41% (33-50) | 49.3 |
+
+Failure types, baseline pooled (119) vs c pooled (114): inv 16 vs 16, pose 20 vs 10, face 19 vs 15, who 6 vs 4, unread 4 vs 22.
+
+Verdict: **not a winner, no change** (the 35B stays the model for real runs). The 9B is 4 points below the 35B baseline (41% vs 45%, intervals overlap) and slower in this setup (49 s per window against about 32 s for the 35B, 1.5x; the cause was not investigated). Its mistakes are different: fewer wrong poses (10 vs 20) but many more lines about motion the stills cannot show ("unread" 22 vs 4: stretches, bobs, head dips). The 9B stays the development model; this does not change that.
+
+Examples:
+- 04_action t=25.8, c: "Blue lion rises on the right. Look at that power!" yes.
+- 04_action t=32.4, c: "Yellow lion stays low and steady while the others move!" no, pose (yellow stands upright).
+- 05_ending t=24.2, c: "The stage is empty. The lion has officially left the building." no, inv (two drummers are still carrying the drum off).
+
+## Session 37 summary
+| arm | pooled grounded | per-run vs baseline (45%) | s/window | result |
+|---|---|---|---|---|
+| r narrow rules | 52% | +7, +8 | 31-34 | not a winner |
+| a 10 frames at 640 px | 37% | -9, -7 | 30-40 | not a winner |
+| b two-step facts | 57% | +18, +7 | 67-100 | not a winner (time and run 2) |
+| c 9B model | 41% | -6, -2 | 48-50 | not a winner |
+No default changed. Combinations were not tried: the rule allows them only if each arm won alone. Best candidates for a later session (not run): arm r's face/gaze ban plus a ban on micro-motion claims (its "unread" lines went from 4 to 21), and arm b with a cheaper facts call (it halved pose errors but cost 2x the time).
