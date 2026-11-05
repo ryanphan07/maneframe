@@ -64,3 +64,11 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 
 ### D7. Default voice stays edge-tts
 - The default TTS voice stays edge-tts. The owner prefers it over Piper and finds both robotic; other voice options are still to be explored.
+
+## 2026-11-05
+
+### D8. Workflow: session branches, PRs and CI
+- Decision: each Claude Code session works on its own branch and ends with a PR. GitHub Actions runs the backend tests (windows-latest) and the frontend test, lint and build (ubuntu-latest) on every PR and on pushes to main. The owner reviews a bundle (PR, handoff, commits, diff, CI result, local re-run) and merges with a merge commit.
+- Alternative considered: commit to local main and let the owner push (the workflow through session 49).
+- Why: the planning chat reviewed only the handoff, never the diff, and test results were the session's own report.
+- Tradeoff: one push and a CI wait per session, and session branches are visible in the public repo. Merge commits, not squash, keep the one-logical-change-per-commit history.
