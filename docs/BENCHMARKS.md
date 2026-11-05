@@ -165,3 +165,40 @@ The app's tts_check lines (6 lines, 37 words), TTS alone, nothing else running, 
 - int8 (92 MB) is not faster than the full model on this CPU (1.3 to 1.5 s against 1.2 to 1.8 s per line), is 0.4 dB quieter and 1.3% slower in speech. The full model stays the default; int8 listening was not done (no way to listen in the session).
 - mp4 export path (acompressor, then loudnorm to -14 LUFS, then alimiter), applied to the six nicole clips of the job: speech goes from -21.4 to -22.1 LUFS to -14.4 to -15.0 LUFS (peaks -1.4 to -1.5 dBFS, +7 dB). The quietest 100 ms of each clip (breath and room floor) goes from -82.5 to -84.9 dBFS to -68.3 to -71.3 dBFS (+14 dB), so the floor sits about 54 dB below the speech and about 7 dB closer to it than before. That is far below audibility next to the ducked original (-14 dB); no breath-noise blow-up. edge's mp3 has digital silence between words (-180 dBFS), so it has no floor to lift. Measured on the clips, not by listening to the finished mp4.
 - Phonemes (kokoro-onnx's default espeak-ng phonemizer): Fanum "fˈænəm", Labubu "lˈæbuːbˌuː", NPC letter by letter, unc "ˈʌŋk", cooked "kˈʊkt", aura farming "ˈɔːɹə fˈɑːɹmɪŋ". None looks wrong; misaki was not tried.
+
+## 2026-11-05 02:24 (long clip: hoco2026, 327 s, Qwen3.6-35B-A3B)
+
+### Environment
+
+- Date: 2026-11-05 02:24
+- Git commit: a32af2a plus the uncommitted benchmark.py timeout/first-partial change (committed afterwards)
+- Model: Qwen3.6-35B-A3B-UD-Q3_K_XL with mmproj-Qwen3.6-35B-F16, llama-server on port 8090, LLM_CTX 8192 (the script queried 8080, which Docker holds, so its own model lookup failed)
+- edge-tts: 7.3.1
+- Python: 3.12.10
+- OS: Windows-11-10.0.26300-SP0
+- Settings (as loaded by this script from backend/.env; the server must have been started from the same folder): LLM_BASE_URL=http://127.0.0.1:8090/v1 (set by environment variable for the backend; the script printed the .env value), LLM_MODEL=local, LLM_TIMEOUT=300.0, LLM_ENABLE_THINKING=False, LLM_MAX_TOKENS=500, LLM_TEMPERATURE=0.8, WINDOW_SECONDS=10.0, FRAMES_PER_WINDOW=6, FRAME_WIDTH=896, MAX_QUIPS_PER_WINDOW=3, MIN_QUIP_GAP_SEC=4.5, TTS_ENGINE=kokoro, TTS_VOICE=en-US-GuyNeural, KOKORO_VOICE=af_nicole, KOKORO_SPEED=1.0, TTS_RATE=+10%, TTS_ENABLED=True, TTS_TIMEOUT_SECONDS=30.0, TTS_CONCURRENCY=1, TTS_START_STAGGER_SECONDS=0.3, TTS_RETRIES=1, MAX_SHIFT_SEC=2.0, MAX_VIDEO_SECONDS=1800.0
+
+### Results
+
+| Run | Clip (length / size) | Total s | Extract / analyze / synth s | Final status | Quips (total / audio / no audio) | Spoken s | Audio overlaps | LLM calls (incl. retries) / avg s / max s | Avg prompt / completion tokens | Shifting / Dropping / TTS failed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| hoco2026_1080p30.mp4 | 326.6 s / 220.8 MB | 1397.1 | 12.1 / 1381.0 / 4.0 | completed | 53 / 53 / 0 | 226.2 | 0 | 33 / 41.1 / 63.4 | 5819 / 120 | 10 / 0 / 0 |
+
+Style: hype.
+Phase seconds come from polling every 2 s (about +/-2 s). Total is wall clock from upload accepted to the first poll that saw `completed`/`error`. Overlap = consecutive audio quips where timestamp + duration_sec exceeds the next timestamp by more than 0.05 s.
+Window, token and Shifting/Dropping/TTS failed columns are from `backend.log.err`; n/a means the job was not found in the log.
+
+Per-window LLM seconds:
+
+- hoco2026_1080p30.mp4: 63.4s, 41.5s, 40.8s, 42.2s, 40.7s, 40.6s, 39.7s, 38.5s, 40.0s, 39.8s, 39.5s, 39.8s, 40.8s, 41.3s, 40.0s, 40.5s, 40.0s, 41.4s, 40.4s, 40.2s, 41.1s, 40.5s, 39.4s, 40.9s, 41.4s, 41.5s, 39.6s, 40.4s, 40.8s, 40.4s, 41.1s, 40.0s, 39.6s
+
+Long-clip notes (hoco2026.MOV, labeled row above; the row is the 1080p copy, not the 6 GB original):
+- Input: the original (4K 120 fps HLG HEVC, 6045 MB) is over the 2 GB cap, so a 1080p 30 fps SDR H.264 copy (220.8 MB) was made first with the same ffmpeg arguments as `transcode.py` (scratch folder outside the repo). That conversion took 537.8 s (about 0.6x real time) and is not in the row's Total; a real upload would add it when the file is accepted. Extract/prepare in the row is only the frame-extraction setup.
+- Total 1397 s (23.3 min) for 326.6 s of video, about 4.3x real time; analyze 1381 s, synthesize tail 4 s (speech overlaps analysis).
+- 33 windows, 33 LLM calls, no retries, no skipped windows. Seconds per call: 63.4 s for window 1 (cold), then 38.5 to 42.2 s (mean about 40.5 s) with no growth across windows.
+- Prompt tokens per call: 5666 to 5864 (flat; the earlier-context summaries are bounded), completion 88 to 149. Highest prompt+completion about 6000 against LLM_CTX 8192.
+- 53 quips, all with audio, 0 audio overlaps, 10 shifts, 0 drops, 0 TTS failures (Kokoro, `af_nicole`).
+- First playable partial quip: 82.3 s after the job started (window 1 took 63.4 s, plus its TTS).
+- Peak backend memory (python.exe, PeakWorkingSet64 read after the run and export, Kokoro loaded): 811 MB. llama-server and ffmpeg are separate processes and were not measured.
+- Export with captions (`POST /api/jobs/{id}/export?captions=1`): 68.8 s to render, 127.2 MB output (1080p, 326.6 s).
+
