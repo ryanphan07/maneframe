@@ -18,7 +18,7 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (343 backend, 36 frontend) verified 2026-11-05; every backend test gets temporary UPLOAD/LABELS dirs from the autouse `isolated_data_dirs` fixture in `backend/tests/conftest.py` (starting the app sweeps UPLOAD_DIR, so a test must never see the real one; `test_isolation.py` guards it); lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (343 backend, 36 frontend; counts measured 2026-11-05, update them here only); every backend test gets temporary UPLOAD/LABELS dirs from the autouse `isolated_data_dirs` fixture in `backend/tests/conftest.py` (starting the app sweeps UPLOAD_DIR, so a test must never see the real one; `test_isolation.py` guards it); lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - One command: `.\start.ps1` (sends one tiny chat request once llama-server is healthy so the first window is not cold; see README Quickstart; settings LLAMA_SERVER_PATH, LLM_MODEL_PATH, LLM_MMPROJ_PATH, LLM_CTX are read by the script only; it takes llama-server's host and port from LLM_BASE_URL and stops at once if that port is held by something that is not llama-server). The backend serves `frontend/dist` at `/` when it exists (`main.mount_frontend`, registered after all routes); the built frontend calls the API same-origin, `npm run dev` still targets :8000.
@@ -27,12 +27,22 @@ Run from the repo root in PowerShell unless noted. Tests (343 backend, 36 fronte
 - Browser checks: `cd frontend; npm run test:e2e` (Playwright specs in `frontend/e2e/`, real llama-server and backend, about 10 minutes; see README Tests for what it needs). It is not part of `npm test`, and port 8000 must be free. Screenshots go to `logs/e2e/`.
 - Frontend: `cd frontend; npm test; npm run lint; npm run build; npm run dev` (dev server on http://localhost:5173).
 
+## Workflow
+- Sessions: one Claude Code session per Session Brief or Quick Task from the owner's planning chat. Each works on its own branch (s<NN>-<slug> or qt-<slug>) created from an up-to-date main and ends with a pushed branch and one PR. Claude Code never commits to main, pushes main, force-pushes or merges.
+- CI: .github/workflows/ci.yml runs on every PR and on pushes to main: backend pytest on windows-latest; frontend npm ci, test, lint and build on ubuntu-latest. CI has no llama-server, network TTS or local voice models; tests that need them are faked, or skipped under CI with a reason.
+- Review and merge: the owner runs maneframe-review <PR> (PR, handoff, commits, diff, CI result, local re-run in one file), pastes it into the planning chat, then maneframe-merge <PR> (merge commit, branch deleted). The helpers live in the owner's PowerShell profile, not in this repo.
+- Guard rails: .claude/settings.json denies Claude Code reads of uploads/, .history/, node_modules/, venv/ and models/, and denies pushes to main, force pushes and gh pr merge. A session never removes or loosens these rules.
+- Handoff: docs/HANDOFF.md is overwritten each session and copied to docs/handoffs/s<NN>.md; manual checks live in docs/MANUAL_CHECKS.md. All three are local and gitignored.
+
 ## Documentation
 - Update docs once at the end of each batch of work, not after every edit:
   - `STATE.md`: what is implemented
   - `TASKS.md`: roadmap
   - `README.md`: what it is, architecture, quickstart, route list, known limitations
 - Docs must match the code. Mark anything unverified as untested.
+- Handoff archive: `docs/handoffs/s<NN>.md` (local, gitignored). Unverifiable items go in `docs/MANUAL_CHECKS.md` (local, gitignored).
+- Test counts are stated only in Commands; README.md and STATE.md point there.
+- DECISIONS.md entries use Decision / Alternative considered / Why / Tradeoff.
 - No pasted chat text, citation markers, or meta commentary in docs.
 
 ## API & WebSocket Contract

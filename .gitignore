@@ -42,3 +42,8 @@ logs/
 # Piper voice models (downloaded by the user, never committed)
 models/
 frontend/test-results/
+
+# Claude Code local settings and session records
+.claude/settings.local.json
+docs/handoffs/
+docs/MANUAL_CHECKS.md
