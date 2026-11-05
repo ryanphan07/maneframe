@@ -9,6 +9,7 @@ Changes after the v0.2.0 tag. Test counts: 343 backend, 36 frontend (2026-11-05)
 - Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole, `KOKORO_GAIN_DB`; `scripts/voice_samples.py` for auditioning; model and voice files go in the git-ignored `models/kokoro/`; setup in the README).
 - Uploads are also converted when the video is H.264 but its long side is above `TRANSCODE_MAX_SIDE` or it is HDR (HLG/PQ), through the same conversion path. Frame rate alone is no trigger. Tested on tiny generated clips only.
 - `start.ps1` takes the llama-server host and port from `LLM_BASE_URL`, passes both to llama-server, and stops at once when the port is held by something that is not llama-server (no llama-server `/health` JSON, or `/v1/models` lists no model). Tested against dummy listeners, not a live Docker Desktop.
+- A page refresh resumes the job: the job id, filename and style are kept in localStorage; a job the server no longer has shows a notice and clears. Covered by Vitest and a Playwright browser check (`npm run test:e2e`).
 - Eval tooling (no effect on the app): `--rotate-terms`/`--seed` in `eval_commentary.py`, `blind_review.py terms`/`humor` options; term counting counts each span of text once, longest match wins ("Twitch chat" is one reference mention).
 
 ## v0.2.0 (tagged 2026-11-04)
