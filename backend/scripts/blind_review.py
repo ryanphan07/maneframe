@@ -305,7 +305,7 @@ def _norm(display: str) -> str:
 
 def count_terms(texts: List[str], slang_terms=None, references=None) -> Dict[str, object]:
     """Lines with a slang term, lines with a reference, and references repeated within the run (mentions minus distinct references).
-    Matching is by word, case-insensitive; 'aura farming' also counts as 'aura' only once per line."""
+    Matching is by word, case-insensitive; 'aura farming' also counts as 'aura' only once per line, and a slang word inside a reference match ("Twitch chat") is not slang."""
     slang_terms = slang_terms or SLANG
     references = references or REFERENCES
     slang_re = [re.compile(r"(?<![\w'])" + re.escape(t) + r"(?![\w'])", re.I) for t in slang_terms]
@@ -314,7 +314,10 @@ def count_terms(texts: List[str], slang_terms=None, references=None) -> Dict[str
     mentions: Counter = Counter()
     slang_mentions: Counter = Counter()
     for text in texts:
-        hit = [t for t, rx in zip(slang_terms, slang_re) if rx.search(text)]
+        ref_spans = [m.span() for rx in ref_re.values() for m in rx.finditer(text)]
+        # a slang word inside a reference phrase ("Twitch chat") belongs to the reference, not the slang count
+        hit = [t for t, rx in zip(slang_terms, slang_re)
+               if any(not any(a <= m.start() and m.end() <= b for a, b in ref_spans) for m in rx.finditer(text))]
         hit = [t for t in hit if not (t in ("aura", "Fanum") and any(o != t and t in o and o in hit for o in slang_terms))]
         slang_lines += bool(hit)
         slang_mentions.update(hit)

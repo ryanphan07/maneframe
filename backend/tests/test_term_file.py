@@ -117,3 +117,10 @@ def test_terms_command_counts_with_term_file(tmp_path):
     texts = ["Blue lion is cooked. Mulan vibes.", "Pink lion, tutorial boss. Mulan again.", "Yellow lion rests."]
     c = br.count_terms(texts, slang, refs)
     assert (c["slang_lines"], c["reference_lines"], c["distinct_references"], c["repeated_references"]) == (2, 2, 1, 1)
+
+
+def test_slang_inside_reference_phrase_is_not_slang(tmp_path):
+    br = _load("blind_review")
+    slang, refs = br.term_lists(SCRIPTS / "eval_arms" / "s_terms.txt")
+    c = br.count_terms(["The crowd roars like Twitch chat.", "A Twitch stream of drums.", "Chat is cooked."], slang, refs)
+    assert c["slang"] == {"chat": 1, "cooked": 1} and c["slang_lines"] == 1 and c["reference_lines"] == 2
