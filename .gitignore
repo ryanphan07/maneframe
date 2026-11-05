@@ -41,3 +41,4 @@ logs/
 
 # Piper voice models (downloaded by the user, never committed)
 models/
+frontend/test-results/

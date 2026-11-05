@@ -18,12 +18,13 @@ Goal: a better product for real users: lion dance teams turning performance clip
 
 ## Commands
 (If any of these is wrong, fix this section.)
-Run from the repo root in PowerShell unless noted. Tests (329 backend, 24 frontend) verified 2026-11-05; every backend test gets temporary UPLOAD/LABELS dirs from the autouse `isolated_data_dirs` fixture in `backend/tests/conftest.py` (starting the app sweeps UPLOAD_DIR, so a test must never see the real one; `test_isolation.py` guards it); lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
+Run from the repo root in PowerShell unless noted. Tests (331 backend, 24 frontend) verified 2026-11-05; every backend test gets temporary UPLOAD/LABELS dirs from the autouse `isolated_data_dirs` fixture in `backend/tests/conftest.py` (starting the app sweeps UPLOAD_DIR, so a test must never see the real one; `test_isolation.py` guards it); lint and build verified 2026-11-02, `uvicorn` last verified 2026-10-27. edge-tts must be >= 7.3.1 (re-run `pip install -r requirements-dev.txt` after pulling).
 - Backend setup (once): `cd backend; python -m venv venv; venv\Scripts\Activate.ps1; pip install -r requirements-dev.txt` (runtime deps are in requirements.txt).
 - Backend tests: `pytest backend/tests -q` (works from the repo root or from `backend/`).
 - One command: `.\start.ps1` (sends one tiny chat request once llama-server is healthy so the first window is not cold; see README Quickstart; settings LLAMA_SERVER_PATH, LLM_MODEL_PATH, LLM_MMPROJ_PATH, LLM_CTX are read by the script only; it takes llama-server's host and port from LLM_BASE_URL and stops at once if that port is held by something that is not llama-server). The backend serves `frontend/dist` at `/` when it exists (`main.mount_frontend`, registered after all routes); the built frontend calls the API same-origin, `npm run dev` still targets :8000.
 - Backend run: `cd backend; uvicorn app.main:app --port 8000`. `backend/.env` is resolved relative to `config.py`, so the working directory does not matter for `.env`. `CORS_ORIGINS` (JSON list) is configurable there.
 - Frontend setup (once): `cd frontend; npm install`. Optional `frontend/.env` with `VITE_API_BASE` (default http://localhost:8000 under `npm run dev`, same-origin in a build); see `.env.example`.
+- Browser checks: `cd frontend; npm run test:e2e` (Playwright specs in `frontend/e2e/`, real llama-server and backend, about 10 minutes; see README Tests for what it needs). It is not part of `npm test`, and port 8000 must be free. Screenshots go to `logs/e2e/`.
 - Frontend: `cd frontend; npm test; npm run lint; npm run build; npm run dev` (dev server on http://localhost:5173).
 
 ## Documentation
