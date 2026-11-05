@@ -29,10 +29,41 @@ function Test-Url($url) {
     try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3 | Out-Null; return $true } catch { return $false }
 }
 
-# True when something accepts TCP connections on the port.
-function Test-Port($port) {
+# True when something accepts TCP connections on the host and port.
+function Test-Port($port, $hostName = '127.0.0.1') {
     $client = New-Object System.Net.Sockets.TcpClient
-    try { $client.Connect('127.0.0.1', [int]$port); return $true } catch { return $false } finally { $client.Close() }
+    try { $client.Connect($hostName, [int]$port); return $true } catch { return $false } finally { $client.Close() }
+}
+
+# GET a URL. Returns @{ Code; Body } for any HTTP answer (including 4xx/5xx), $null when nothing answers.
+function Get-Http($url) {
+    try {
+        $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
+        return @{ Code = [int]$r.StatusCode; Body = [string]$r.Content }
+    } catch {
+        $resp = $_.Exception.Response
+        if (-not $resp) { return $null }
+        $body = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $body = $_.ErrorDetails.Message }
+        else { try { $body = (New-Object IO.StreamReader($resp.GetResponseStream())).ReadToEnd() } catch {} }
+        return @{ Code = [int]$resp.StatusCode; Body = $body }
+    }
+}
+
+# What answers at the llama-server root: 'ready' (llama-server /health says ok and /v1/models lists a model), 'loading'
+# (llama-server still loading weights), 'foreign' (answers HTTP but is not llama-server) or 'none' (no HTTP answer).
+function Get-LlamaState($root) {
+    $h = Get-Http "$root/health"
+    if (-not $h) { return 'none' }
+    $j = $null
+    try { $j = $h.Body | ConvertFrom-Json } catch {}
+    if ($h.Code -eq 503 -and $j -and $j.error -and "$($j.error.message)" -match 'Loading model') { return 'loading' }
+    if ($h.Code -ne 200 -or -not $j -or $j.status -ne 'ok') { return 'foreign' }
+    $m = Get-Http "$root/v1/models"
+    $mj = $null
+    try { $mj = $m.Body | ConvertFrom-Json } catch {}
+    if ($m -and $m.Code -eq 200 -and $mj -and (($mj.data | Measure-Object).Count -gt 0 -or ($mj.models | Measure-Object).Count -gt 0)) { return 'ready' }
+    return 'foreign'
 }
 
 # One tiny chat request so the first real window does not pay for loading weights into the GPU. Best effort: a
@@ -79,17 +110,21 @@ try {
     # --- llama-server, only when /health does not answer ---
     $llmBase = Get-Setting 'LLM_BASE_URL' 'http://127.0.0.1:8080/v1'
     $llmRoot = $llmBase -replace '/v1/?$', ''
-    $llmPort = ([uri]$llmRoot).Port
-    # A port that is taken but not answering /health is not ours to start on; give a loading server 30 s, then stop.
-    if ((-not (Test-Url "$llmRoot/health")) -and (Test-Port $llmPort)) {
+    $llmUri = [uri]$llmRoot
+    $llmPort = $llmUri.Port
+    $llmHost = $llmUri.Host
+    $foreignMsg = "Port $llmPort at $llmHost is held by something that is not llama-server (/health has no llama-server JSON, or /v1/models lists no model). Free the port, or set LLM_BASE_URL in backend\.env to a free one."
+    $llmState = Get-LlamaState $llmRoot
+    if ($llmState -eq 'foreign') { Fail $foreignMsg }
+    # Taken but not speaking HTTP, or a llama-server still loading: give it 30 s, then stop.
+    if ($llmState -eq 'loading' -or ($llmState -eq 'none' -and (Test-Port $llmPort $llmHost))) {
         Write-Host "Port $llmPort is in use; waiting up to 30 s for $llmRoot/health..."
         $portDeadline = (Get-Date).AddSeconds(30)
-        while (-not (Test-Url "$llmRoot/health") -and (Get-Date) -lt $portDeadline) { Start-Sleep -Seconds 2 }
-        if (-not (Test-Url "$llmRoot/health")) {
-            Fail "Port $llmPort is in use by something that does not answer $llmRoot/health. Stop that program, or set LLM_BASE_URL in backend\.env to a free port."
-        }
+        while ($llmState -notin 'ready', 'foreign' -and (Get-Date) -lt $portDeadline) { Start-Sleep -Seconds 2; $llmState = Get-LlamaState $llmRoot }
+        if ($llmState -eq 'foreign') { Fail $foreignMsg }
+        if ($llmState -ne 'ready') { Fail "Port $llmPort is in use by something that does not answer $llmRoot/health. Stop that program, or set LLM_BASE_URL in backend\.env to a free port." }
     }
-    if (Test-Url "$llmRoot/health") {
+    if ($llmState -eq 'ready') {
         Write-Host "llama-server already running at $llmRoot; leaving it alone."
     } else {
         $exe = Get-Setting 'LLAMA_SERVER_PATH'
@@ -102,13 +137,13 @@ try {
         if (-not $mmproj -or -not (Test-Path $mmproj)) { Fail 'mmproj not found. Set LLM_MMPROJ_PATH in backend\.env.' }
         $llmLog = Join-Path $logDir 'llama-server.log'
         Write-Host "Starting llama-server (log: $llmLog)"
-        $llmArgs = @('-m', $model, '--mmproj', $mmproj, '-c', $ctx, '-np', '1', '-ngl', '99', '--port', $llmPort, '--jinja')
+        $llmArgs = @('-m', $model, '--mmproj', $mmproj, '-c', $ctx, '-np', '1', '-ngl', '99', '--host', $llmHost, '--port', $llmPort, '--jinja')
         $llm = Start-Process -FilePath $exe -ArgumentList $llmArgs -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $llmLog -RedirectStandardError "$llmLog.err"
         $started += $llm
         Write-Host 'Waiting for the model to load...'
         $deadline = (Get-Date).AddMinutes(10)
-        while (-not (Test-Url "$llmRoot/health")) {
+        while ((Get-LlamaState $llmRoot) -ne 'ready') {
             if ($llm.HasExited) { Fail "llama-server exited (see $llmLog.err)." }
             if ((Get-Date) -gt $deadline) { Fail "llama-server did not become healthy in 10 minutes (see $llmLog.err)." }
             Start-Sleep -Seconds 2
