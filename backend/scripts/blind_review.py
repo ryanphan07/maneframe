@@ -303,9 +303,18 @@ def _norm(display: str) -> str:
     return re.sub(r"^(?:a|an|the)\s+", "", display.lower())
 
 
+def _longest_wins(matches):
+    """(start, end, key) matches with overlapping ones dropped, the longest kept (earlier on a tie)."""
+    kept = []
+    for m in sorted(matches, key=lambda m: (-(m[1] - m[0]), m[0])):
+        if not any(m[0] < k[1] and k[0] < m[1] for k in kept):
+            kept.append(m)
+    return sorted(kept)
+
+
 def count_terms(texts: List[str], slang_terms=None, references=None) -> Dict[str, object]:
     """Lines with a slang term, lines with a reference, and references repeated within the run (mentions minus distinct references).
-    Matching is by word, case-insensitive; 'aura farming' also counts as 'aura' only once per line, and a slang word inside a reference match ("Twitch chat") is not slang."""
+    Matching is by word, case-insensitive; a span of text counts once (longest match wins), and a slang word inside a reference match ("Twitch chat") is not slang."""
     slang_terms = slang_terms or SLANG
     references = references or REFERENCES
     slang_re = [re.compile(r"(?<![\w'])" + re.escape(t) + r"(?![\w'])", re.I) for t in slang_terms]
@@ -314,14 +323,16 @@ def count_terms(texts: List[str], slang_terms=None, references=None) -> Dict[str
     mentions: Counter = Counter()
     slang_mentions: Counter = Counter()
     for text in texts:
-        ref_spans = [m.span() for rx in ref_re.values() for m in rx.finditer(text)]
-        # a slang word inside a reference phrase ("Twitch chat") belongs to the reference, not the slang count
-        hit = [t for t, rx in zip(slang_terms, slang_re)
-               if any(not any(a <= m.start() and m.end() <= b for a, b in ref_spans) for m in rx.finditer(text))]
-        hit = [t for t in hit if not (t in ("aura", "Fanum") and any(o != t and t in o and o in hit for o in slang_terms))]
+        # each span of text counts once, longest match wins ("Twitch chat" beats "Twitch" and "chat"; "aura farming" beats "aura")
+        refs_hit = _longest_wins([(m.start(), m.end(), name) for name, rx in ref_re.items() for m in rx.finditer(text)])
+        ref_spans = [(a, b) for a, b, _ in refs_hit]
+        # a slang word inside a reference phrase belongs to the reference, not the slang count
+        slang_hit = _longest_wins([(m.start(), m.end(), t) for t, rx in zip(slang_terms, slang_re) for m in rx.finditer(text)
+                                   if not any(a <= m.start() and m.end() <= b for a, b in ref_spans)])
+        hit = list(dict.fromkeys(t for _, _, t in slang_hit))
         slang_lines += bool(hit)
         slang_mentions.update(hit)
-        refs = [name for name, rx in ref_re.items() if rx.search(text)]
+        refs = list(dict.fromkeys(n for _, _, n in refs_hit))
         ref_lines += bool(refs)
         mentions.update(refs)
     return {"lines": len(texts), "slang_lines": slang_lines, "reference_lines": ref_lines,

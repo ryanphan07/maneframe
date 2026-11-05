@@ -124,3 +124,12 @@ def test_slang_inside_reference_phrase_is_not_slang(tmp_path):
     slang, refs = br.term_lists(SCRIPTS / "eval_arms" / "s_terms.txt")
     c = br.count_terms(["The crowd roars like Twitch chat.", "A Twitch stream of drums.", "Chat is cooked."], slang, refs)
     assert c["slang"] == {"chat": 1, "cooked": 1} and c["slang_lines"] == 1 and c["reference_lines"] == 2
+
+
+def test_overlapping_matches_count_once_longest_wins():
+    br = _load("blind_review")
+    slang, refs = br.term_lists(SCRIPTS / "eval_arms" / "s_terms.txt")
+    c = br.count_terms(["Like Twitch chat, the drums go off."], slang, refs)
+    assert sum(c["references"].values()) == 1 and c["slang"] == {} and c["repeated_references"] == 0
+    c = br.count_terms(["Aura farming on the poles."], slang, refs)
+    assert c["slang"] == {"aura farming": 1}
