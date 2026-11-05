@@ -155,10 +155,32 @@ def unblind(pool: str) -> None:
     print(f"Wrote {root / 'unblinded.csv'}")
 
 
-def humor(pool: str, groups: List[str], per_group: int, seed: int) -> None:
+RATING_COL = "rating (1-5)"
+
+
+def read_anchors(sheet_path: Path, count: int, rng: random.Random) -> List[Dict[str, str]]:
+    """`count` random rated lines from an earlier owner humor sheet (rating column filled), each with the path of its strip
+    and the rating the owner gave. Their origin in that sheet's own key.csv is carried along when the key exists."""
+    with open(sheet_path, newline="", encoding="utf-8-sig") as f:
+        rows = [r for r in csv.DictReader(f) if (r.get(RATING_COL) or "").strip()]
+    origin: Dict[str, Dict[str, str]] = {}
+    key_path = sheet_path.parent / "key.csv"
+    if key_path.exists():
+        with open(key_path, newline="", encoding="utf-8-sig") as f:
+            origin = {r["id"]: r for r in csv.DictReader(f)}
+    picked = rng.sample(rows, min(count, len(rows)))
+    for r in picked:
+        r["strip_path"] = str(sheet_path.parent / r["strip"]) if r.get("strip") else ""
+        r["origin"] = (origin.get(r["id"]) or {}).get("arm", "")
+    return picked
+
+
+def humor(pool: str, groups: List[str], per_group: int, seed: int, anchors: "Path | None" = None, anchor_count: int = 10) -> None:
     """Owner humor sheet from a pool's lines: per_group random lines from each GROUP=arm,arm..., shuffled, origin hidden.
+    With `anchors` (an earlier, already rated owner sheet), `anchor_count` of its rated lines are shuffled in; they are the
+    reference for how this owner rates, and key.csv records them as group "anchor" with the old rating.
     Writes logs/grounding/owner_humor/<pool>/: sheet.csv (id, clip, t, text, strip, rating; rating empty), strips/NN.jpg,
-    index.html (line and strip together) and key.csv (id -> group, arm, source)."""
+    index.html (line and strip together) and key.csv (id -> group, arm, source, old rating)."""
     import html
     import shutil
 
@@ -168,34 +190,81 @@ def humor(pool: str, groups: List[str], per_group: int, seed: int) -> None:
     with open(root / "sheet.csv", newline="", encoding="utf-8-sig") as f:
         sheet = {int(r["id"]): r for r in csv.DictReader(f)}
     rng = random.Random(seed)
-    picked: List[Tuple[int, str]] = []
+    picked: List[Dict[str, str]] = []
     for spec in groups:
         name, _, arms = spec.partition("=")
         ids = sorted(i for i, r in key.items() if r["arm"] in arms.split(","))
-        picked += [(i, name) for i in rng.sample(ids, min(per_group, len(ids)))]
+        for i in rng.sample(ids, min(per_group, len(ids))):
+            src = key[i].get("image", "")
+            full = REPO_DIR / "logs" / "grounding" / src
+            picked.append({"group": name, "clip": sheet[i]["clip"], "t": sheet[i]["t"], "text": sheet[i]["text"],
+                           "strip_path": str(full) if src and full.exists() else "", "arm": key[i]["arm"],
+                           "source": key[i]["source"], "pool_id": str(i), "old_rating": ""})
+    if anchors is not None:
+        for r in read_anchors(anchors, anchor_count, rng):
+            picked.append({"group": "anchor", "clip": r["clip"], "t": r["t"], "text": r["text"], "strip_path": r["strip_path"],
+                           "arm": r["origin"], "source": str(anchors), "pool_id": r["id"], "old_rating": r[RATING_COL]})
     rng.shuffle(picked)
     out = HUMOR_DIR / pool
     (out / "strips").mkdir(parents=True, exist_ok=True)
     cards = []
     with open(out / "sheet.csv", "w", newline="", encoding="utf-8-sig") as f, open(out / "key.csv", "w", newline="", encoding="utf-8-sig") as k:
         w, kw = csv.writer(f), csv.writer(k)
-        w.writerow(["id", "clip", "t", "text", "strip", "rating (1-5)"])
-        kw.writerow(["id", "group", "arm", "source", "pool_id"])
-        for n, (i, group) in enumerate(picked, 1):
-            src = key[i].get("image", "")
+        w.writerow(["id", "clip", "t", "text", "strip", RATING_COL])
+        kw.writerow(["id", "group", "arm", "source", "pool_id", "old_rating"])
+        for n, r in enumerate(picked, 1):
             strip = f"strips/{n:02d}.jpg"
-            if src and (REPO_DIR / "logs" / "grounding" / src).exists():
-                shutil.copy(REPO_DIR / "logs" / "grounding" / src, out / strip)
+            if r["strip_path"] and Path(r["strip_path"]).exists():
+                shutil.copy(r["strip_path"], out / strip)
             else:
                 strip = ""
-            r = sheet[i]
             w.writerow([n, r["clip"], r["t"], r["text"], strip, ""])
-            kw.writerow([n, group, key[i]["arm"], key[i]["source"], i])
+            kw.writerow([n, r["group"], r["arm"], r["source"], r["pool_id"], r["old_rating"]])
             cards.append(f'<div><p><b>{n}</b> &nbsp; {html.escape(r["clip"])} t={float(r["t"]):.1f}s</p><p style="font-size:1.3em">{html.escape(r["text"])}</p>'
                          + (f'<img src="{strip}" style="max-width:100%">' if strip else "") + "<p>rating 1-5: ____</p><hr></div>")
     (out / "index.html").write_text('<meta charset="utf-8"><title>Humor sheet</title><body style="font-family:sans-serif;max-width:1100px;margin:auto">'
                                     "<h2>Rate each line 1 (not funny) to 5 (very funny)</h2>" + "".join(cards) + "</body>", encoding="utf-8")
     print(f"{len(picked)} lines in {out} (sheet.csv has an empty rating column; key.csv hides the origin)")
+
+
+SLANG = ["cooked", "aura farming", "aura", "locked in", "NPC", "main character", "side quest", "crash out", "it's giving", "ate",
+         "no cap", "lowkey", "unc", "chat", "buffering", "Fanum tax", "Fanum"]
+REFERENCES = {"Lion King": "lion king|simba|mufasa|hakuna", "Kung Fu Panda": "kung fu panda|master shifu|dragon warrior",
+              "Mario Kart": "mario ?kart|mario|blue shell|rainbow road", "Minecraft": "minecraft|creeper", "NBA": "nba|dunk|lebron|curry|free throw|buzzer",
+              "Squid Game": "squid game|red light|green light", "KPop Demon Hunters": "k-?pop|demon hunters|huntrix",
+              "Labubu": "labubu", "Twitch": "twitch|streamer|stream|donation|subscribers?"}
+
+
+def count_terms(texts: List[str]) -> Dict[str, object]:
+    """Lines with a slang term, lines with a reference, and references repeated within the run (mentions minus distinct references).
+    Matching is by word, case-insensitive; 'aura farming' also counts as 'aura' only once per line."""
+    slang_re = [re.compile(r"(?<![\w'])" + re.escape(t) + r"(?![\w'])", re.I) for t in SLANG]
+    ref_re = {name: re.compile(r"(?<!\w)(?:" + pat + r")(?!\w)", re.I) for name, pat in REFERENCES.items()}
+    slang_lines = ref_lines = 0
+    mentions: Counter = Counter()
+    slang_mentions: Counter = Counter()
+    for text in texts:
+        hit = [t for t, rx in zip(SLANG, slang_re) if rx.search(text)]
+        hit = [t for t in hit if not (t in ("aura", "Fanum") and any(o != t and t in o and o in hit for o in SLANG))]
+        slang_lines += bool(hit)
+        slang_mentions.update(hit)
+        refs = [name for name, rx in ref_re.items() if rx.search(text)]
+        ref_lines += bool(refs)
+        mentions.update(refs)
+    return {"lines": len(texts), "slang_lines": slang_lines, "reference_lines": ref_lines,
+            "repeated_references": sum(c - 1 for c in mentions.values()), "repeated_slang": sum(c - 1 for c in slang_mentions.values()),
+            "references": dict(mentions), "slang": dict(slang_mentions)}
+
+
+def terms(runs: List[str]) -> None:
+    """Per run (LABEL=eval csv): lines, lines with slang, lines with a reference, repeats within the run."""
+    print(f"{'run':<12} {'lines':>5} {'slang':>6} {'refs':>5} {'ref repeats':>12} {'slang repeats':>14}  references")
+    for spec in runs:
+        label, _, path = spec.partition("=")
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            texts = [r["text"] for r in csv.DictReader(f)]
+        c = count_terms(texts)
+        print(f"{label:<12} {c['lines']:>5} {c['slang_lines']:>6} {c['reference_lines']:>5} {c['repeated_references']:>12} {c['repeated_slang']:>14}  {c['references']}")
 
 
 def main() -> int:
@@ -214,11 +283,17 @@ def main() -> int:
     h.add_argument("--group", action="append", required=True, metavar="NAME=ARM,ARM", help="e.g. baseline=base_a,base_b")
     h.add_argument("--per-group", type=int, default=15)
     h.add_argument("--seed", type=int, default=38)
+    h.add_argument("--anchors", type=Path, help="an earlier rated owner sheet.csv; --anchor-count of its rated lines are shuffled in as the reference")
+    h.add_argument("--anchor-count", type=int, default=10)
+    t = sub.add_parser("terms", help="count slang terms and pop-culture references per run")
+    t.add_argument("run", nargs="+", metavar="LABEL=CSV")
     a = p.parse_args()
     if a.cmd == "make":
         make(a.pool, a.clip_dir, a.arm, {k: int(v) for k, v in (s.split("=") for s in a.sample)}, a.seed)
     elif a.cmd == "humor":
-        humor(a.pool, a.group, a.per_group, a.seed)
+        humor(a.pool, a.group, a.per_group, a.seed, a.anchors, a.anchor_count)
+    elif a.cmd == "terms":
+        terms(a.run)
     else:
         unblind(a.pool)
     return 0
