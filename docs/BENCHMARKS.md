@@ -132,3 +132,36 @@ TTS alone (the app's own `generate_audio_clip`, the same 7 fixed lines of 7 to 9
 - Run 1 lost one clip to edge-tts ("No audio was received", retried once, failed again): quip 7 had text only. Piper had no failures in 2 runs, 12 clips.
 - Piper speaks about 25% less audio for the same text (16.6 s against 22.1 s), so its voice is faster even at `PIPER_LENGTH_SCALE=0.9`; the scheduler uses the measured duration, so overlaps are unaffected (0 overlaps in all 4 runs). The quips differ between runs (the model writes new lines each time), which is why "Spoken s" in the first table is not comparable between engines.
 - Not measured: voice quality (subjective; the lessac voice is a flat, clear American voice, edge's GuyNeural is more expressive), other Piper voices, `TTS_ENGINE=piper` through the browser player, a wav in the mp4 export (export reads the file with ffmpeg, which decodes wav; the export tests use mp3).
+
+
+## 2026-11-04: Kokoro (af_nicole) end to end, and Kokoro against edge-tts (session 39)
+
+Kokoro 0.5.0 (`kokoro-onnx`, CPU onnxruntime), `kokoro-v1.0.onnx` (326 MB) with `voices-v1.0.bin`, voice `af_nicole`, speed 1.0, no gain. Job: hoco_40s.mp4 (40.2 s), hype, Qwen3.6-35B-A3B UD-Q3_K_XL at `-c 8192` started by `start.ps1` (llama-server on Vulkan and the backend share the machine), `benchmark.py`. One run, so run-to-run noise (about 10 s per call, see the 2026-11-03 sections) applies.
+
+| Run | Engine | Total s | Extract / analyze / synth s | Quips (audio) | Spoken s | Overlaps | Shifting / Dropping / TTS failed |
+|---|---|---|---|---|---|---|---|
+| 1 | kokoro af_nicole | 215.1 | 6.4 / 204.7 / 4.0 | 6 (6) | 24.8 | 0 | 0 / 0 / 0 (counted by hand in the log) |
+
+Seconds per line in the job (from the `TTS kokoro` log line), against the audio each line produced:
+
+| Line t | 2.50 | 9.17 | 14.17 | 20.83 | 30.85 | 37.62 |
+|---|---|---|---|---|---|---|
+| Words | 10 | 9 | 9 | 9 | 7 | 6 |
+| Synthesis s | 5.58 (includes the one-time model load) | 2.94 | 2.31 | 2.42 | 2.11 | 1.89 |
+| Audio s | 4.95 | 4.69 | 4.07 | 4.07 | 3.50 | 3.52 |
+
+So 1.9 to 2.9 s per line while llama-server is working, about 0.5 of real time, and 3 to 4 s extra once for the load. The model windows took 68, 46, 42 and 43 s (prompt 6000 to 6160 tokens). The benchmark script reads `logs/backend.log` but uvicorn writes its log to `backend.log.err` under `start.ps1`, so its Shifting/Dropping/TTS failed and token columns were n/a; the counts above are from the `.err` file (no Shifting, Dropping or TTS failed lines).
+
+The app's tts_check lines (6 lines, 37 words), TTS alone, nothing else running, edge-tts GuyNeural +10% against Kokoro:
+
+| Voice | Integrated LUFS (peak dBFS) | Audio s | Words/s (audio only) | Synthesis s per line |
+|---|---|---|---|---|
+| edge GuyNeural | -19.6 (-1.4) | 17.54 | 2.11 | 1.0 to 1.2 |
+| kokoro af_nicole, full | -21.0 (-2.7) | 18.05 | 2.05 | 1.2 to 1.8 (3.8 for the first, model load) |
+| kokoro af_nicole, int8 | -21.4 (-2.5) | 18.28 | 2.02 | 1.3 to 1.5 (3.9 for the first) |
+
+- Loudness: nicole is 1.4 dB quieter than GuyNeural, under the 3 dB bar, so no gain is applied (`KOKORO_GAIN_DB=0`). Per line nicole varied -20.4 to -21.5, GuyNeural -18.3 to -21.3. The "whisper" is therefore not a level difference in LUFS; whether it sounds thin or breathy is a listening question (see not verified).
+- Speech rate: nicole at speed 1.0 is 2.05 words/s of audio (the job: 50 words in 24.8 s, 2.02), the same as edge's 2.11 raw. CONVENTIONS' 1.8 words/s counts padding. Both are above 1.5, so `MIN_QUIP_GAP_SEC` (4.5) and the 10-word limit stay as they are; nothing was changed.
+- int8 (92 MB) is not faster than the full model on this CPU (1.3 to 1.5 s against 1.2 to 1.8 s per line), is 0.4 dB quieter and 1.3% slower in speech. The full model stays the default; int8 listening was not done (no way to listen in the session).
+- mp4 export path (acompressor, then loudnorm to -14 LUFS, then alimiter), applied to the six nicole clips of the job: speech goes from -21.4 to -22.1 LUFS to -14.4 to -15.0 LUFS (peaks -1.4 to -1.5 dBFS, +7 dB). The quietest 100 ms of each clip (breath and room floor) goes from -82.5 to -84.9 dBFS to -68.3 to -71.3 dBFS (+14 dB), so the floor sits about 54 dB below the speech and about 7 dB closer to it than before. That is far below audibility next to the ducked original (-14 dB); no breath-noise blow-up. edge's mp3 has digital silence between words (-180 dBFS), so it has no floor to lift. Measured on the clips, not by listening to the finished mp4.
+- Phonemes (kokoro-onnx's default espeak-ng phonemizer): Fanum "fˈænəm", Labubu "lˈæbuːbˌuː", NPC letter by letter, unc "ˈʌŋk", cooked "kˈʊkt", aura farming "ˈɔːɹə fˈɑːɹmɪŋ". None looks wrong; misaki was not tried.

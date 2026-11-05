@@ -13,7 +13,7 @@ Changes since v0.1.0.
 - `start.ps1` warms the model with one tiny request.
 - Commentary styles (`hype`, `deadpan`, `broadcast`) chosen in a dropdown, served by `GET /api/styles`.
 - Scene continuity: each window gets the last quips and what the model saw before, plus a lion dance glossary in the system prompt.
-- Optional offline speech: `TTS_ENGINE=piper` (Piper, CPU, wav) with `PIPER_MODEL_PATH` and `PIPER_LENGTH_SCALE`; edge-tts stays the default. Setup in the README.
+- Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole; `scripts/voice_samples.py` for auditioning; setup in the README). Piper: `TTS_ENGINE=piper` (Piper, CPU, wav) with `PIPER_MODEL_PATH` and `PIPER_LENGTH_SCALE`; edge-tts stays the default. Setup in the README.
 - Eval script (`backend/scripts/eval_commentary.py`): LLM-only runs to CSV with a rating summary.
 - Moment labels: add, list, delete and export (CSV) labels on the player timeline, stored by video content hash.
 - Phone-clip transcode: HEVC, undecodable and rotated uploads are converted to upright H.264 as the job's first step, with progress; the prepared video is served with Range support.

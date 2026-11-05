@@ -210,3 +210,30 @@ Examples (arm shown after un-blinding):
 - 03_close t=20.8, new run 1: "Blue lion is officially late to the party. Look at that head shake!" unclear, face (the only mistake claim in the new runs).
 
 Owner humor sheet (not waited for): `logs/grounding/owner_humor/pool_s38/` has 15 random baseline lines and 15 new lines, shuffled, with the origin in `key.csv` only. Fill the `rating (1-5)` column of `sheet.csv`, or read `index.html`, which shows each line with its strip.
+
+
+# Session 39: arm s (slang and pop culture), TTS voice check
+
+## Rubric v3 addendum (written before arm s was judged)
+A comparison or slang label ("aura farming", "like Mario Kart", "Fanum tax collected", "the lions logged off") is not a factual claim; judge only the observed part of the line against the strip. The comparison counts as a claim only when it asserts a pose, motion or event: "Leg day" on lions that are crouched is yes; "Mario Kart drift" on a lion that did not move is no (failure type pose). A comparison does not turn a wrong observation into a yes ("Fanum tax collected" on an envelope no lion is on is no).
+
+## Arm s: slang and pop culture (`backend/scripts/eval_arms/s_slang.txt`, appended to hype with `--rules-file`)
+Two runs on the 5-clip set (`eval/results/s39s1`, `s39s2`; 35B UD-Q3_K_XL, hype, glossary and examples on, everything else default). Blind pool `pool_s39`: all 119 arm s lines plus a 30-line drift sample (15 random lines from each s38 default run, `s38n1`, `s38n2`), 149 lines, one judge (this session), rubric v3 plus the addendum above, un-blinded afterwards.
+
+| | lines | yes | no | unclear | grounded (Wilson 95%) | notable | s/window | prompt tokens mean (max) |
+|---|---|---|---|---|---|---|---|---|
+| arm s run 1 | 60 | 39 | 7 | 14 | 65% (52-76) | 35% | 41.3 | 6019 (6631) |
+| arm s run 2 | 59 | 42 | 4 | 13 | 71% (59-81) | 22% | 40.2 | 6026 (6632) |
+| arm s pooled | 119 | 81 | 11 | 27 | 68% (59-76) | 28% | 40.8 | 6023 |
+| drift sample (s38 default) | 30 | 16 | 3 | 11 | 53% (36-70) | 30% | 40.3 (s38) | 5710 (6349) |
+
+Failure types (lines that were not yes): arm s unread 22, pose 7, named 4, inv 3, who 1, face 1; drift sample unread 8, named 3, who 2, pose 1. The arm text adds about 310 prompt tokens; headroom at the largest call is 8192 - 6632 - 500 = 1060 tokens. Mistake-claim words: 0 in both. The drift sample is small (30 lines, interval 36-70), so the 15-point difference in favor of arm s is not a finding; the s38 default pooled over 118 lines was 57%.
+
+Humor terms (`blind_review.py terms`, whole runs): lines with a slang term 45 of 60 and 51 of 59 (96 of 119, 81%; the s38 default runs: 0 and 1 of 118); lines with a reference from the prompt's list 0 and 1 (one "NBA dunk"); references repeated within a run 0. Other comparisons outside the list appeared (Yoshi jump, scoreboard, kickoff, starting pistol). The rule "never reuse a slang term that appears in the recent quips" did not hold: 108 repeated uses over the two runs ("main character" 28 times, "locked in" 23, "NPC" 13, "chat" 10, "aura" 18 with "aura farming").
+
+What went wrong (examples, arm shown after un-blinding, all arm s): "Pink lion is farming aura by crouching low" (02_drummers t=24.2, pink is rearing, no/pose); "Blue lion enters center stage, setting the tempo!" and "Blue lion hits center stage" (01_opening, the blue lion enters at the right by the drummers, no/pose); "Blue lion drops the scroll. Fanum tax collected." (pink dropped its scroll, blue still held its own, no/who); "Yellow lion on the red envelope. Fanum tax collected." (04_action t=7.5, yellow stands with a red scroll, no/pose; the prompt's own example lines were copied almost word for word several times, e.g. this one twice and "Chat, are they buffering?" twice). Unread lines were mostly head shakes, wiggles and "stacking" that the strips cannot show.
+
+## Humor sheet and decision rule (verdict pending the owner's ratings)
+`logs/grounding/owner_humor/pool_s39/`: 40 lines, shuffled: 30 random arm s lines and 10 anchors from the rated `pool_s38` sheet (`blind_review.py humor --anchors <rated sheet>`); the origin and the old anchor rating are in `key.csv` only. All 10 anchors drawn were rated 2 by the owner (27 of the 30 lines in s38 were 2), so the anchor mean in this sheet is expected to be near 2.0 and condition (a) needs an arm s mean of about 2.7 or more.
+
+Decision rule, fixed before the ratings: arm s becomes `hype.txt` only if (a) the owner mean on arm s lines is at least 0.7 above the mean on the 10 anchor lines in the same sheet, and (b) the pooled grounded rate is no more than 10 points below the drift sample's. Condition (b) holds (68% against 53%, above rather than below). Condition (a) is open. `hype.txt` was not changed. Two things for the owner to weigh when rating: slang appears in 81% of lines and repeats heavily, and almost no named reference appears, so the line is mostly "pose + slang label".
