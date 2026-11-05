@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import LabelPanel from './LabelPanel';
 
 const STALE_SECONDS = 4;
@@ -8,8 +8,10 @@ const SERVER_VIDEO_READY = ['analyzing', 'synthesizing', 'completed'];
 
 const formatTime = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 
-const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, readyUntil = null, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 } }) => {
+const VideoPlayer = ({ videoUrl, jobId, apiBase, commentaryQuips, readyUntil = null, processingStatus, audioAvailable = true, skipped = { ranges: [], total: 0 }, videoRef: externalRef = null }) => {
   const videoRef = useRef(null);
+  // App passes a ref to read the player position for the export range
+  useImperativeHandle(externalRef, () => ({ get currentTime() { return videoRef.current?.currentTime; } }), []);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [useServerCopy, setUseServerCopy] = useState(false);

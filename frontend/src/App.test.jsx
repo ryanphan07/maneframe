@@ -194,6 +194,39 @@ describe('resume after a page refresh', () => {
     expect(FakeSocket.instances).toHaveLength(0);
   });
 
+  it('requests the export with the chosen aspect and range and names the file after them', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.resolve({ data: { status: 'completed', progress: 100, result: { quips: [quip(2, 'done quip')], total_windows: 3, skipped: [] } } }));
+    render(<App />);
+    await screen.findByText(/done quip/);
+    axios.post.mockResolvedValueOnce({ data: { url: '/api/jobs/j9/export.mp4?captions=1&aspect=9%3A16&start=2&end=15' } });
+    const downloads = [];
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = realCreate(tag);
+      if (tag === 'a') el.click = () => downloads.push({ href: el.href, name: el.download });
+      return el;
+    });
+    fireEvent.change(screen.getByLabelText('Video size'), { target: { value: '9:16' } });
+    fireEvent.change(screen.getByLabelText(/Start/), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/End/), { target: { value: '15' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download video' })); });
+    expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('/api/jobs/j9/export'), null, { params: { captions: 1, aspect: '9:16', start: 2, end: 15 } });
+    expect(downloads).toHaveLength(1);
+    expect(downloads[0].href).toContain('/api/jobs/j9/export.mp4?captions=1&aspect=9%3A16&start=2&end=15');
+    expect(downloads[0].name).toBe('maneframe_big_9x16_2-15s.mp4');
+  });
+
+  it('Set start and Set end read the position of the player', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.resolve({ data: { status: 'completed', progress: 100, result: { quips: [quip(2, 'done quip')], total_windows: 3, skipped: [] } } }));
+    const { container } = render(<App />);
+    await screen.findByText(/done quip/);
+    container.querySelector('video').currentTime = 7.26;
+    fireEvent.click(screen.getByRole('button', { name: 'Set start' }));
+    expect(screen.getByLabelText(/Start/)).toHaveValue(7.3);
+  });
+
   it('clears the saved job and shows a notice when the server answers 404', async () => {
     localStorage.setItem('maneframe.job', JSON.stringify(saved));
     serve(Promise.reject({ response: { status: 404 } }));

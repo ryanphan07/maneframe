@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { uploadSizeError } from './uploadLimit';
 import VideoPlayer from './components/VideoPlayer';
+import ExportControls from './components/ExportControls';
+import { exportFileName, exportParams } from './exportOptions';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -49,7 +51,6 @@ const errorDetail = (error, fallback) => {
   return typeof detail === 'string' && detail ? detail : fallback;
 };
 
-const exportFileName = (originalName) => `maneframe_${originalName.replace(/\.[^.]*$/, '')}.mp4`;
 
 function App() {
   const [commentaryQuips, setCommentaryQuips] = useState([]);
@@ -62,7 +63,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [exportJob, setExportJob] = useState(null);
-  const [captions, setCaptions] = useState(true);
+  const playerRef = useRef(null);
   const [rendering, setRendering] = useState(false);
   const [styles, setStyles] = useState([]);
   const [style, setStyle] = useState('');
@@ -247,7 +248,7 @@ function App() {
       if (cancelled) return;
       jobIdRef.current = saved.jobId;
       setResumed(true);
-      setExportJob({ jobId: saved.jobId, fileName: exportFileName(saved.fileName || 'clip') });
+      setExportJob({ jobId: saved.jobId, fileName: saved.fileName || 'clip' });
       if (saved.style) setStyle(saved.style);
       if (data.status === 'error') {
         clearJob();
@@ -330,7 +331,7 @@ function App() {
       const jobId = data.job_id;
       jobIdRef.current = jobId;
       saveJob({ jobId, fileName: file.name, style });
-      setExportJob({ jobId, fileName: exportFileName(file.name) });
+      setExportJob({ jobId, fileName: file.name });
 
       const url = URL.createObjectURL(file);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -347,17 +348,17 @@ function App() {
     }
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (options) => {
     if (!exportJob || rendering) return;
     setRendering(true);
     try {
       // render on the server first (errors come back as JSON), then let the browser stream the file from its URL
       const { data } = await axios.post(`${API_BASE}/api/jobs/${exportJob.jobId}/export`, null, {
-        params: { captions: captions ? 1 : 0 },
+        params: exportParams(options),
       });
       const link = document.createElement('a');
       link.href = new URL(data.url, API_BASE || window.location.origin).href;
-      link.download = exportJob.fileName;
+      link.download = exportFileName(exportJob.fileName, options);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -422,21 +423,7 @@ function App() {
         )}
 
         {processingStatus === 'completed' && exportJob && (
-          <div style={{ margin: '1rem 0' }}>
-            <button type="button" onClick={handleDownload} disabled={rendering}>
-              {rendering ? 'Rendering video…' : 'Download video'}
-            </button>
-            <label style={{ marginLeft: '1rem' }}>
-              <input
-                type="checkbox"
-                checked={captions}
-                onChange={(e) => setCaptions(e.target.checked)}
-                disabled={rendering}
-              />{' '}
-              Captions
-            </label>
-            {rendering && <div><small>Rendering can take a while for long clips.</small></div>}
-          </div>
+          <ExportControls rendering={rendering} onDownload={handleDownload} getCurrentTime={() => playerRef.current?.currentTime} />
         )}
 
         {playUrl && (
@@ -445,6 +432,7 @@ function App() {
               key={playUrl}
               videoUrl={playUrl}
               jobId={exportJob?.jobId}
+              videoRef={playerRef}
               apiBase={API_BASE}
               commentaryQuips={commentaryQuips}
               readyUntil={readyUntil}
