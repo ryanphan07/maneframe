@@ -23,6 +23,7 @@ from app.services.llm import GLOSSARY_PATH
 QUALITIES = ("good", "needs work", "none")
 OTHER = "other"
 MAX_NOTE_CHARS = 500
+MAX_TERM_CHARS = 40
 CSV_FIELDS = ("id", "t", "label", "quality", "note", "created_at")
 ALL_CSV_FIELDS = ("hash", "filename") + CSV_FIELDS
 
@@ -33,15 +34,32 @@ class LabelError(ValueError):
     """Invalid label input; the message is safe to show to the client."""
 
 
+def glossary_terms(text: str) -> list[str]:
+    """Glossary terms: bullets written as "Term: description" (parenthetical alternates dropped), at any depth.
+    A bullet with nothing after its colon ("- Stacks:") is a group heading: its children are terms. A bullet that has
+    a description owns the lines under it as steps ("- 7-star: ..." then "    - snap left ..."), and those are not terms.
+    Section headers and wrapped continuation lines are not bullets, so they never match."""
+    terms: list[str] = []
+    stack: list[tuple[int, bool]] = []  # (indent, is_group_heading) of the open ancestors
+    for line in text.splitlines():
+        m = re.match(r"^(\s*)- (.*)", line)
+        if not m:
+            continue
+        indent, body = len(m.group(1).expandtabs(4)), m.group(2)
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        head, colon, desc = body.partition(":")
+        is_group = bool(colon) and not desc.strip()
+        term = re.sub(r"\s*\(.*?\)", "", head).strip()
+        if colon and not is_group and term and len(term) <= MAX_TERM_CHARS and all(g for _, g in stack) and term not in terms:
+            terms.append(term)
+        stack.append((indent, is_group))
+    return terms
+
+
 def label_options() -> list[str]:
-    """Terms from the glossary (the text before the colon, without the parenthetical alternate), plus 'other'."""
-    terms = []
-    for line in GLOSSARY_PATH.read_text(encoding="utf-8").splitlines():
-        if line.startswith("- ") and ":" in line:
-            term = re.sub(r"\s*\(.*?\)", "", line[2:].split(":", 1)[0]).strip()
-            if term:
-                terms.append(term)
-    return terms + [OTHER]
+    """The glossary's terms (see glossary_terms), plus 'other'."""
+    return glossary_terms(GLOSSARY_PATH.read_text(encoding="utf-8")) + [OTHER]
 
 
 @lru_cache(maxsize=32)

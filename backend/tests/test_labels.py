@@ -25,6 +25,35 @@ def test_label_options_come_from_the_glossary():
     assert not any("(" in o for o in opts)
 
 
+def test_glossary_terms_are_top_level_terms_not_steps_or_headings():
+    text = (
+        "- Cai qing (choy ching): plucking the greens\n\nMoves:\n"
+        "- 7-star (chat sing): a celebration\n"
+        "    - snap left with right leg following the head.\n"
+        "    - 3 super snaps: left, right, middle.\n"
+        "- stunts are done with the base holding the sash\n"
+        "    shaken first, then a pre-hop: wrapped line\n"
+        "- Stacks:\n"
+        "    - Half stack (two legs): head lands on the base's hips\n"
+        "        - this is typically done from a practice jump: nested step\n"
+        "    - head set: head sits on the base's head\n"
+        "- Routine:\n"
+        "    - Modern 1 (groups of 3): formation is 3 lions\n"
+        "        - 5 Super snaps: left, right\n"
+        "    - 7-star: call back beat\n"
+    )
+    assert labels_module.glossary_terms(text) == ["Cai qing", "7-star", "Half stack", "head set", "Modern 1"]
+
+
+def test_real_glossary_options_have_terms_and_no_steps_or_headings():
+    opts = labels_module.label_options()
+    for term in ("7-star", "Super snaps", "Half stack", "head set", "Modern 1"):
+        assert term in opts
+    assert not {"Moves", "Stunts", "Routine", "Stacks", "Jumps"} & set(opts)
+    assert not any(len(o) > labels_module.MAX_TERM_CHARS or o.startswith(("snap ", "3 super snaps")) for o in opts)
+    assert len(opts) == len(set(opts))
+
+
 def test_add_list_delete_roundtrip(client, job):
     r = client.post(f"/api/jobs/{job}/labels", json=body(t=2.0))
     assert r.status_code == 201
