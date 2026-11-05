@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import threading
+import time
 import wave
 from typing import Any, Dict, List, Optional
 
@@ -297,6 +298,7 @@ async def generate_audio_clip(quip: Dict[str, Any], video_id: Optional[str] = No
     audio_filename = f"audio_{timestamp:.2f}_{text_hash}.{'wav' if piper or kokoro else 'mp3'}"
     audio_path = os.path.join(audio_dir, audio_filename)
 
+    started = time.monotonic()
     attempts = 1 + max(0, settings.TTS_RETRIES)
     for attempt in range(1, attempts + 1):
         try:
@@ -331,6 +333,7 @@ async def generate_audio_clip(quip: Dict[str, Any], video_id: Optional[str] = No
         _remove_quietly(audio_path)
         return None
 
+    logger.info("TTS %s t=%.2f: %.2f s to synthesize %.2f s of audio (%d words)", settings.TTS_ENGINE, timestamp, time.monotonic() - started, duration, len(text.split()))
     audio_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/uploads/audio/{video_id}/{audio_filename}"
     return {"timestamp": timestamp, "text": text, "audio_url": audio_url, "duration_sec": duration}
 
