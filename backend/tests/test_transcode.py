@@ -276,3 +276,41 @@ def test_high_fps_hdr_clip_is_converted_to_capped_sdr(tmp_path, monkeypatch):
     out = probe(path)
     assert "h264" in out and "bt709" in out and not transcode.is_hdr(out)
     assert "128x72" in out and "30 fps" in out
+
+
+def test_parse_size_and_needs_transcode_size_and_hdr_rules():
+    assert transcode.parse_size(HDR_PROBE) == (3840, 2160) and transcode.parse_size(SDR_PROBE) == (1920, 1080)
+    assert transcode.parse_size("no stream here") is None
+    assert transcode.needs_transcode("h264", 0, True, (3840, 2160), False)
+    assert transcode.needs_transcode("h264", 0, True, (2160, 3840), False)  # portrait: the long side counts
+    assert transcode.needs_transcode("h264", 0, True, (1920, 1080), True)
+    assert not transcode.needs_transcode("h264", 0, True, (1920, 1080), False)
+    assert not transcode.needs_transcode("h264", 0, True, None, False)
+
+
+def test_h264_over_max_side_is_downscaled(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcode.settings, "TRANSCODE_MAX_SIDE", 128)
+    path = tmp_path / "big.mp4"
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=size=256x144:rate=10:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path))
+    assert asyncio.run(transcode.normalize_video(str(path), opencv_can_read=True)) is True
+    out = probe(path)
+    assert "h264" in out and "128x72" in out
+
+
+def test_h264_hlg_clip_is_tonemapped_to_sdr(tmp_path):
+    path = tmp_path / "hlg.mp4"
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=size=128x72:rate=10:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p10le",
+           "-x264-params", "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc", str(path))
+    assert transcode.is_hdr(probe(path)), "test clip should be tagged HLG"
+    assert asyncio.run(transcode.normalize_video(str(path), opencv_can_read=True)) is True
+    out = probe(path)
+    assert "h264" in out and not transcode.is_hdr(out) and "bt709" in out
+
+
+def test_h264_1080p30_is_left_untouched_and_high_fps_alone_is_no_trigger(tmp_path):
+    for name, size, rate in (("a.mp4", "1920x1080", 30), ("b.mp4", "320x180", 120)):
+        path = tmp_path / name
+        ffmpeg("-f", "lavfi", "-i", f"testsrc2=size={size}:rate={rate}:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path))
+        before = path.read_bytes()
+        assert asyncio.run(transcode.normalize_video(str(path), opencv_can_read=True)) is False
+        assert path.read_bytes() == before
