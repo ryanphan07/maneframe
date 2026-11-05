@@ -1,3 +1,8 @@
 # Few-shot examples for the commentary prompt. Lines starting with # are ignored.
 # Add one example per line as: {"t": <seconds>, "text": "<line>"}
 # The file is added to the prompt only if it contains at least one non-comment line.
+
+{"t": 2.0, "text": "Awww the sleepy lions are starting to wake up! how cute"}
+{"t": 5.5, "text": "it seems that a certain lion is kind of lost..."}
+{"t": 8.0, "text": "where's that lion looking? up at heaven?"}
+{"t": 3.5, "text": "yikes, someone just had an oopsie"}
