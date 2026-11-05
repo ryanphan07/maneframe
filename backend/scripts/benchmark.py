@@ -191,7 +191,7 @@ def append_section(path: Path, section: str) -> None:
     path.write_text(existing.rstrip() + "\n\n" + section, encoding="utf-8")
 
 
-def run_clip(client, base_url: str, clip: Path, label: str, style: Optional[str] = None) -> Dict[str, Any]:
+def run_clip(client, base_url: str, clip: Path, label: str, style: Optional[str] = None, timeout_seconds: float = JOB_TIMEOUT_SECONDS) -> Dict[str, Any]:
     from app.services.video_processor import get_video_duration
 
     result: Dict[str, Any] = {
@@ -212,17 +212,20 @@ def run_clip(client, base_url: str, clip: Path, label: str, style: Optional[str]
     result["job_id"] = job_id
     first_seen: Dict[str, float] = {}
     job: Dict[str, Any] = {}
-    while time.monotonic() - t0 < JOB_TIMEOUT_SECONDS:
+    while time.monotonic() - t0 < timeout_seconds:
         job = client.get(f"{base_url}/api/jobs/{job_id}", timeout=30).json()
         now = time.monotonic() - t0
         if job["status"] not in first_seen:
             first_seen[job["status"]] = now
             print(f"  +{now:6.1f}s {job['status']} ({job.get('message')})")
+        if "first_partial_seconds" not in result and (job.get("result") or {}).get("partial"):
+            result["first_partial_seconds"] = now  # first playable quip (a long clip's wait before anything shows)
+            print(f"  +{now:6.1f}s first partial result")
         if job["status"] in ("completed", "error"):
             break
         time.sleep(POLL_SECONDS)
     else:
-        result["message"] = f"timed out after {JOB_TIMEOUT_SECONDS // 60} min (last status {job.get('status')})"
+        result["message"] = f"timed out after {int(timeout_seconds) // 60} min (last status {job.get('status')})"
         result["status"] = "timeout"
         result["phases"] = phase_seconds(first_seen)
         return result
@@ -272,6 +275,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--out", default=str(REPO_DIR / "docs" / "BENCHMARKS.md"))
     parser.add_argument("--log", default=None, help="backend log file (default logs/backend.log.err, what start.ps1 writes), for window timings and Shifting/Dropping/TTS failed counts")
+    parser.add_argument("--timeout-min", type=float, default=JOB_TIMEOUT_SECONDS / 60, help="give up on a clip after this many minutes (long clips need more than the default 15)")
     parser.add_argument("--style", default=None, help="commentary style sent with each upload (server default when omitted)")
     parser.add_argument("--warm-first", action="store_true", help='run the first clip again at the end, labelled "warm (prompt cache)"')
     args = parser.parse_args()
@@ -292,7 +296,7 @@ def main() -> int:
         env = environment(args.base_url, settings.LLM_BASE_URL.rstrip("/"), client)
         for clip, label in plan:
             print(f"== {label}")
-            rows.append(run_clip(client, args.base_url, clip, label, args.style))
+            rows.append(run_clip(client, args.base_url, clip, label, args.style, args.timeout_min * 60))
             print(f"  -> {rows[-1]['status']} {rows[-1]['message']}")
 
     notes = [
