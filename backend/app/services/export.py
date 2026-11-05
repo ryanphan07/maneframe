@@ -3,6 +3,7 @@ scheduled timestamps, and optionally the quip text burned in as captions."""
 
 import asyncio
 import logging
+import math
 import os
 import re
 import subprocess
@@ -13,6 +14,7 @@ import cv2
 
 from app.config import settings
 from app.services import tts as tts_service
+from app.services import video_processor as video_processor_service
 
 logger = logging.getLogger("maneframe.export")
 
@@ -25,6 +27,10 @@ CRF = 23
 CAPTIONS_FILE = "captions.ass"
 GRAPH_FILE = "filter_graph.txt"
 STDERR_TAIL = 2000
+ASPECTS = ("original", "9:16")
+VERTICAL_RATIO = 9 / 16
+VERTICAL_MAX_HEIGHT = 1920
+END_TOLERANCE_SEC = 0.5  # an end this far past the measured duration is player rounding, not a range outside the clip
 
 
 class ExportError(Exception):
@@ -93,11 +99,17 @@ def caption_spans(quips: List[ExportQuip]) -> List[Tuple[float, float, str]]:
     return spans
 
 
-def build_ass(quips: List[ExportQuip], width: int, height: int) -> str:
-    """An ASS subtitle file sized to the video: bottom center, white text on a translucent box."""
-    font_size = max(12, round(min(width, height) * 0.055))
-    margin_v = round(height * 0.06)
-    margin_x = round(width * 0.06)
+def build_ass(quips: List[ExportQuip], width: int, height: int, vertical: bool = False) -> str:
+    """An ASS subtitle file sized to the video: bottom center, white text on a translucent box. `vertical` (9:16) sizes
+    the text from the width and lifts it into the lower third, above the area Instagram and TikTok cover with their UI."""
+    if vertical:
+        font_size = max(12, round(width * 0.062))
+        margin_v = round(height * 0.2)
+        margin_x = round(width * 0.08)
+    else:
+        font_size = max(12, round(min(width, height) * 0.055))
+        margin_v = round(height * 0.06)
+        margin_x = round(width * 0.06)
     pad = max(2, round(font_size * 0.25))
     lines = [
         "[Script Info]",
@@ -137,6 +149,69 @@ def _num(value: float) -> str:
     return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
+def _even(value: float) -> int:
+    return max(2, int(round(value / 2)) * 2)
+
+
+VerticalCrop = Tuple[int, int, int, int, int, int]
+
+
+def vertical_crop(width: int, height: int, box: Optional[Tuple[float, float, float, float]]) -> VerticalCrop:
+    """(x, y, crop_w, crop_h, out_w, out_h) for a 9:16 window centered on the motion box (fractions x0, y0, x1, y1; None
+    is the frame center), clamped to the frame. A landscape source keeps its full height; a source already narrower than
+    9:16 keeps its full width. The output is 1080x1920, or the window's own size when that is smaller; all even."""
+    if width / height > VERTICAL_RATIO:
+        crop_h = height - height % 2
+        crop_w = min(_even(crop_h * VERTICAL_RATIO), width - width % 2)
+    else:
+        crop_w = width - width % 2
+        crop_h = min(_even(crop_w / VERTICAL_RATIO), height - height % 2)
+    cx = width / 2 if box is None else (box[0] + box[2]) / 2 * width
+    cy = height / 2 if box is None else (box[1] + box[3]) / 2 * height
+    x = int(round(min(max(cx - crop_w / 2, 0), width - crop_w)))
+    y = int(round(min(max(cy - crop_h / 2, 0), height - crop_h)))
+    x, y = x - x % 2, y - y % 2
+    out_h = min(VERTICAL_MAX_HEIGHT, crop_h)
+    out_w = _even(out_h * VERTICAL_RATIO)
+    return x, y, crop_w, crop_h, out_w, out_h
+
+
+def normalize_range(start: Optional[float], end: Optional[float], duration: float) -> Tuple[Optional[float], Optional[float]]:
+    """Validate a trim range against the clip. Returns (start, end) with None where the range reaches the clip's own
+    start or end, so an untrimmed export keeps its cache entry and ffmpeg arguments. Raises ExportError (400)."""
+    if start is not None and start < 0:
+        raise ExportError("The start time cannot be negative.", 400)
+    if start is not None and end is not None and start >= end:
+        raise ExportError("The start time must be before the end time.", 400)
+    if start is not None and start >= duration:
+        raise ExportError(f"The start time is outside the video, which is {duration:.1f} s long.", 400)
+    if end is not None and end > duration + END_TOLERANCE_SEC:
+        raise ExportError(f"The end time is outside the video, which is {duration:.1f} s long.", 400)
+    if end is not None and end >= duration - 0.001:
+        end = None
+    if start is not None and start <= 0.001:
+        start = None
+    return start, end
+
+
+def select_trim_quips(quips: List[ExportQuip], start: Optional[float], end: Optional[float]) -> List[ExportQuip]:
+    """The quips for a trimmed export, timestamps shifted by -start. Only a quip that starts inside [start, end) is kept,
+    and one that would run past an explicit end (its audio length, or the 3 s caption without audio) is dropped, never
+    cut. With no trim the list is returned untouched."""
+    if start is None and end is None:
+        return quips
+    lo = start or 0.0
+    kept = []
+    for quip in quips:
+        if quip.timestamp < lo or (end is not None and quip.timestamp >= end):
+            continue
+        length = quip.duration_sec if quip.audio_path and quip.duration_sec else NO_AUDIO_CAPTION_SEC
+        if end is not None and quip.timestamp + length > end:
+            continue
+        kept.append(ExportQuip(quip.timestamp - lo, quip.text, quip.audio_path, quip.duration_sec))
+    return kept
+
+
 def build_filter_graph(
     duration: float,
     has_audio: bool,
@@ -144,6 +219,7 @@ def build_filter_graph(
     captions_file: Optional[str] = None,
     duck_db: Optional[float] = None,
     quip_lufs: Optional[float] = None,
+    vertical: Optional[VerticalCrop] = None,
 ) -> str:
     """The -filter_complex graph. Each quip is loudness-normalized to `quip_lufs` (loudnorm) so both TTS engines land at
     the same level, and the original is lowered by `duck_db` while a quip plays; both default to the settings. `captions_file` is relative: ffmpeg runs with the job's export folder as its working
@@ -151,8 +227,12 @@ def build_filter_graph(
     duck_db = settings.EXPORT_DUCK_DB if duck_db is None else duck_db
     quip_lufs = settings.EXPORT_QUIP_LUFS if quip_lufs is None else quip_lufs
     spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
-    # even dimensions are required by yuv420p H.264; this changes nothing for even-sized video
-    video_filters = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
+    if vertical:  # `duration` is the output length; vertical is vertical_crop's window and 9:16 size (even)
+        x, y, crop_w, crop_h, out_w, out_h = vertical
+        video_filters = [f"crop={crop_w}:{crop_h}:{x}:{y}", f"scale={out_w}:{out_h}:flags=lanczos"]
+    else:
+        # even dimensions are required by yuv420p H.264; this changes nothing for even-sized video
+        video_filters = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
     if captions_file:
         video_filters.append(f"subtitles={captions_file}")
     graph = [f"[0:v]{','.join(video_filters)}[vout]"]
@@ -186,11 +266,15 @@ def build_ffmpeg_args(
     has_audio: bool,
     quips: List[ExportQuip],
     graph_file: str = GRAPH_FILE,
+    start: Optional[float] = None,
 ) -> List[str]:
     """The ffmpeg command line. The filter graph is read from `graph_file` (see build_filter_graph) because a long graph
     would exceed the Windows command-line limit; `graph_file` and `output_name` are relative to ffmpeg's working directory."""
     spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
-    args = [ffmpeg, "-hide_banner", "-nostdin", "-y", "-i", video_path]
+    args = [ffmpeg, "-hide_banner", "-nostdin", "-y"]
+    if start:  # input seek (frame-accurate: the video is re-encoded), so audio and quip timestamps begin at 0
+        args += ["-ss", _num(start), "-t", _num(duration)]
+    args += ["-i", video_path]
     for quip in spoken:
         args += ["-i", quip.audio_path]
     args += ["-filter_complex_script", graph_file, "-map", "[vout]"]
@@ -212,8 +296,21 @@ def export_dir(job_id: str) -> str:
     return os.path.join(settings.UPLOAD_DIR, "exports", job_id)
 
 
-def export_file(job_id: str, captions: bool) -> str:
-    return os.path.join(export_dir(job_id), f"captions{int(captions)}.mp4")
+def export_name(captions: bool, aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None) -> str:
+    """The cache key as a file name: captions, aspect and the normalized range. Untouched defaults keep the old
+    `captions<0|1>.mp4`, so exports rendered before these options existed stay valid."""
+    name = f"captions{int(captions)}"
+    if aspect != "original":
+        name += "_" + aspect.replace(":", "x")
+    if start is not None:
+        name += f"_s{_num(start)}"
+    if end is not None:
+        name += f"_e{_num(end)}"
+    return name + ".mp4"
+
+
+def export_file(job_id: str, captions: bool, aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None) -> str:
+    return os.path.join(export_dir(job_id), export_name(captions, aspect, start, end))
 
 
 def _probe_video(path: str) -> Tuple[int, int, float]:
@@ -285,34 +382,66 @@ def _relative_audio(quips: List[ExportQuip], folder: str) -> List[ExportQuip]:
     return result
 
 
-_locks: Dict[Tuple[str, bool], asyncio.Lock] = {}
+_locks: Dict[Tuple, asyncio.Lock] = {}
 
 
-async def render_export(job_id: str, video_path: str, quips: List[Dict[str, Any]], captions: bool) -> str:
-    """Return the path of the rendered mp4, rendering it first if it is not cached. Raises ExportError."""
+def check_options(aspect: str, start: Optional[float], end: Optional[float]) -> None:
+    """The checks that need no video: an unknown aspect, a negative start, start not before end. Raises ExportError (400)."""
+    if aspect not in ASPECTS:
+        raise ExportError(f"Unknown aspect '{aspect}'. Use one of: {', '.join(ASPECTS)}.", 400)
+    for value in (start, end):
+        if value is not None and not math.isfinite(value):
+            raise ExportError("The start and end times must be numbers of seconds.", 400)
+    if start is not None and start < 0:
+        raise ExportError("The start time cannot be negative.", 400)
+    if start is not None and end is not None and start >= end:
+        raise ExportError("The start time must be before the end time.", 400)
+
+
+async def render_export(
+    job_id: str, video_path: str, quips: List[Dict[str, Any]], captions: bool,
+    aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None,
+) -> str:
+    """Return the path of the rendered mp4, rendering it first if it is not cached. `aspect` is "original" or "9:16"
+    (a motion-centered vertical crop); `start`/`end` trim to that range in seconds. Raises ExportError."""
+    check_options(aspect, start, end)
+    untouched = aspect == "original" and start is None and end is None
     final = export_file(job_id, captions)
-    lock = _locks.setdefault((job_id, captions), asyncio.Lock())
+    lock = _locks.setdefault((job_id, captions, aspect, start, end), asyncio.Lock())
     async with lock:
-        if os.path.isfile(final):
+        if untouched and os.path.isfile(final):
             return final
         if not os.path.isfile(video_path):
             raise ExportError("The source video is no longer available. Process the clip again.", 404)
+        width, height, duration = await asyncio.to_thread(_probe_video, video_path)
+        start, end = normalize_range(start, end, duration)
+        final = export_file(job_id, captions, aspect, start, end)
+        if os.path.isfile(final):
+            return final
         ffmpeg = resolve_ffmpeg()
-        items = export_quips(job_id, quips)
+        items = select_trim_quips(export_quips(job_id, quips), start, end)
         folder = export_dir(job_id)
         os.makedirs(folder, exist_ok=True)
-        partial = f"captions{int(captions)}.partial.mp4"
+        partial = os.path.basename(final)[: -len(".mp4")] + ".partial.mp4"
+        length = (end if end is not None else duration) - (start or 0.0)
         try:
-            width, height, duration = await asyncio.to_thread(_probe_video, video_path)
             has_audio = await _has_audio_stream(ffmpeg, video_path, folder)
+            vertical = None
+            out_w, out_h = width, height
+            if aspect == "9:16":
+                box = await asyncio.to_thread(video_processor_service.compute_crop_box, video_path, duration)
+                vertical = vertical_crop(width, height, box)
+                out_w, out_h = vertical[4], vertical[5]
             captions_file = None
             if captions:
                 captions_file = CAPTIONS_FILE
                 with open(os.path.join(folder, captions_file), "w", encoding="utf-8") as f:
-                    f.write(build_ass(items, width, height))
+                    f.write(build_ass(items, out_w, out_h, vertical=vertical is not None))
             with open(os.path.join(folder, GRAPH_FILE), "w", encoding="utf-8") as f:
-                f.write(build_filter_graph(duration, has_audio, items, captions_file))
-            args = build_ffmpeg_args(ffmpeg, video_path, partial, duration, has_audio, _relative_audio(items, folder))
+                f.write(build_filter_graph(length, has_audio, items, captions_file, vertical=vertical))
+            args = build_ffmpeg_args(
+                ffmpeg, video_path, partial, length, has_audio, _relative_audio(items, folder), start=start,
+            )
             try:
                 code, stderr = await _run(args, folder, settings.EXPORT_TIMEOUT_SECONDS)
             except (asyncio.TimeoutError, subprocess.TimeoutExpired):

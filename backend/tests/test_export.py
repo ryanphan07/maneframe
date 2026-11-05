@@ -320,3 +320,164 @@ async def test_real_render_with_300_quips_stays_under_the_command_line_limit(upl
     assert sum(len(a) + 1 for a in seen["args"]) < 32000  # the Windows CreateProcess limit is 32767
     assert len(seen["args"]) > 600  # one -i per quip, none of the graph
     assert (upload_dir / "exports" / job_id / "filter_graph.txt").read_text().count("adelay") == 300
+
+
+# ---- 9:16 and trim -----------------------------------------------------------------------------
+
+
+def test_defaults_are_untouched_by_the_new_options():
+    plain = args_for([spoken(1.0, 2.0)])
+    assert "-ss" not in plain and plain[plain.index("-i") + 1] == "C:/up/v.mp4"
+    assert "crop=" not in graph_of([spoken(1.0, 2.0)])
+    assert export_module.export_name(True) == "captions1.mp4" and export_module.export_name(False) == "captions0.mp4"
+    quips = [spoken(1.0, 2.0)]
+    assert export_module.select_trim_quips(quips, None, None) is quips
+
+
+def test_vertical_crop_centers_on_the_motion_box_and_clamps_to_the_frame():
+    # 1920x1080: the window is 608x1080 (even), not scaled because the source is shorter than 1920
+    x, y, cw, ch, ow, oh = export_module.vertical_crop(1920, 1080, (0.6, 0.2, 0.8, 0.9))
+    assert (cw, ch, y, ow, oh) == (608, 1080, 0, 608, 1080)
+    assert x == 1344 - 304  # box center 0.7 * 1920 = 1344
+    assert export_module.vertical_crop(1920, 1080, (0.0, 0.0, 0.1, 1.0))[0] == 0  # clamped at the left edge
+    assert export_module.vertical_crop(1920, 1080, (0.95, 0.0, 1.0, 1.0))[0] == 1920 - 608  # and the right edge
+    assert export_module.vertical_crop(1920, 1080, None)[0] == (1920 - 608) // 2  # no box: frame center
+
+
+def test_vertical_crop_scales_a_tall_source_to_1080x1920_and_handles_portrait_input():
+    x, y, cw, ch, ow, oh = export_module.vertical_crop(3840, 2160, (0.4, 0.0, 0.6, 1.0))
+    assert (cw, ch, ow, oh) == (1216, 2160, 1080, 1920) and x % 2 == 0
+    # already 9:16: the whole frame; narrower than 9:16: full width, a shorter window centered on the box vertically
+    assert export_module.vertical_crop(1080, 1920, (0.4, 0.4, 0.6, 0.6)) == (0, 0, 1080, 1920, 1080, 1920)
+    x, y, cw, ch, ow, oh = export_module.vertical_crop(720, 1600, (0.4, 0.8, 0.6, 1.0))
+    assert (x, cw, ch, y) == (0, 720, 1280, 1600 - 1280)
+
+
+def test_vertical_graph_crops_then_scales_then_burns_captions():
+    window = (672, 0, 608, 1080, 608, 1080)
+    graph = build_filter_graph(15.0, True, [spoken(1.0, 2.0)], "captions.ass", vertical=window)
+    assert graph.splitlines()[0] == "[0:v]crop=608:1080:672:0,scale=608:1080:flags=lanczos,subtitles=captions.ass[vout];"
+    assert "trunc(iw/2)" not in graph
+
+
+def test_vertical_captions_sit_in_the_lower_third_with_a_vertical_font():
+    wide = build_ass([spoken(1.0, 2.0)], 1920, 1080)
+    tall = build_ass([spoken(1.0, 2.0)], 1080, 1920, vertical=True)
+
+    def style(ass):
+        fields = [line for line in ass.splitlines() if line.startswith("Style:")][0].split(",")
+        return int(fields[2]), int(fields[-2])  # font size, bottom margin
+
+    assert style(wide) == (round(1080 * 0.055), round(1080 * 0.06))
+    size, margin = style(tall)
+    assert size == round(1080 * 0.062) and margin == round(1920 * 0.2)
+    assert 1920 - margin > 1920 * (2 / 3)  # the caption sits on the lower third
+
+
+def test_trim_selects_quips_that_start_inside_and_finish_before_end_and_shifts_them():
+    quips = [spoken(2.0, 1.0, "a"), spoken(10.0, 2.0, "b"), spoken(14.0, 2.0, "c"), spoken(20.0, 1.0, "d"), silent(14.5, "s")]
+    kept = export_module.select_trim_quips(quips, 5.0, 15.0)
+    assert [(q.text, q.timestamp) for q in kept] == [("line b", 5.0)]  # c would run to 16 and s to 17.5: dropped, not cut
+    assert [q.text for q in export_module.select_trim_quips(quips, 5.0, None)] == ["line b", "line c", "line d", "s"]
+    assert [q.timestamp for q in export_module.select_trim_quips(quips, None, 12.0)] == [2.0, 10.0]  # b ends exactly at 12: kept
+
+
+def test_trimmed_args_seek_the_input_and_cap_the_length():
+    args = build_ffmpeg_args(FFMPEG, "v.mp4", "o.mp4", 15.0, True, [spoken(1.0, 2.0)], start=20.0)
+    assert args[args.index("-ss") + 1] == "20" and args.index("-ss") < args.index("-i")
+    assert args[args.index("-i") - 2:args.index("-i")] == ["-t", "15"]
+    assert args[-5:-3] == ["-t", "15"]  # the output length is the same
+
+
+def test_normalize_range_validates_and_collapses_whole_clip_ends():
+    norm = export_module.normalize_range
+    assert norm(None, None, 40.0) == (None, None)
+    assert norm(0.0, 40.0, 40.0) == (None, None)  # the whole clip: the same cache entry as an untrimmed export
+    assert norm(5.0, 40.3, 40.0) == (5.0, None)  # within the player's rounding
+    assert norm(10.0, 25.0, 40.0) == (10.0, 25.0)
+    for bad in [(-1, 5), (10, 10), (20, 10), (40, None), (50, None), (None, 41)]:
+        with pytest.raises(ExportError) as err:
+            norm(*bad, 40.0)
+        assert err.value.status_code == 400
+
+
+def test_cache_keys_differ_by_aspect_range_and_captions():
+    name = export_module.export_name
+    keys = {name(True), name(False), name(True, "9:16"), name(True, "9:16", 5.0), name(True, "9:16", 5.0, 20.5), name(True, "original", None, 20.5)}
+    assert len(keys) == 6
+    assert name(True, "9:16", 5.0, 20.5) == "captions1_9x16_s5_e20.5.mp4"
+    assert ":" not in name(True, "9:16")
+
+
+def test_route_rejects_bad_options_with_400_and_passes_good_ones(client, upload_dir, monkeypatch):
+    job_id = completed_job(upload_dir)
+    seen = []
+
+    async def fake_render(jid, video_path, quips, captions, **options):
+        seen.append(options)
+        out = upload_dir / "out.mp4"
+        out.write_bytes(b"x")
+        return str(out)
+
+    monkeypatch.setattr(main_module, "render_export", fake_render)
+    for query in ["aspect=1:1", "aspect=", "start=5&end=5", "start=9&end=3", "start=-2", "end=nan"]:
+        assert client.post(f"/api/jobs/{job_id}/export?{query}").status_code == 400, query
+        assert client.get(f"/api/jobs/{job_id}/export.mp4?{query}").status_code == 400, query
+    assert client.post(f"/api/jobs/{job_id}/export?start=abc").status_code == 422
+    assert seen == []
+
+    resp = client.post(f"/api/jobs/{job_id}/export?captions=1&aspect=9:16&start=2.5&end=17")
+    assert resp.status_code == 200
+    assert resp.json() == {"url": f"/api/jobs/{job_id}/export.mp4?captions=1&aspect=9%3A16&start=2.5&end=17"}
+    assert seen == [{"aspect": "9:16", "start": 2.5, "end": 17.0}]
+    resp = client.get(f"/api/jobs/{job_id}/export.mp4?aspect=9:16&start=2.5&end=17")
+    assert "maneframe_clip_9x16_2.5-17s.mp4" in resp.headers["content-disposition"]
+    client.post(f"/api/jobs/{job_id}/export")
+    assert seen[-1] == {}  # defaults reach render_export exactly as before
+
+
+@pytest.mark.anyio
+async def test_render_rejects_a_range_outside_the_clip_before_ffmpeg(upload_dir, monkeypatch):
+    video = upload_dir / "videos" / "v.mp4"
+    video.parent.mkdir()
+    video.write_bytes(b"x")
+    monkeypatch.setattr(export_module, "_probe_video", lambda path: (320, 240, 10.0))
+    for start, end in [(12.0, None), (None, 30.0), (4.0, 3.0)]:
+        with pytest.raises(ExportError) as err:
+            await export_module.render_export("j" * 32, str(video), [], True, start=start, end=end)
+        assert err.value.status_code == 400
+    with pytest.raises(ExportError) as err:
+        await export_module.render_export("j" * 32, str(video), [], True, aspect="4:3")
+    assert err.value.status_code == 400
+
+
+@pytest.mark.skipif(not export_module.ffmpeg_available(), reason="no ffmpeg binary available")
+@pytest.mark.anyio
+async def test_real_vertical_trimmed_render_has_the_right_size_length_and_cache(upload_dir):
+    ffmpeg = export_module.resolve_ffmpeg()
+    job_id = "c" * 32
+    video = upload_dir / "videos" / f"{job_id}_wide.mp4"
+    video.parent.mkdir()
+    audio_dir = upload_dir / "audio" / job_id
+    audio_dir.mkdir(parents=True)
+
+    def run(*a):
+        subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", *a], check=True)
+
+    run("-f", "lavfi", "-i", "testsrc2=size=640x360:rate=10:duration=12", "-f", "lavfi", "-i", "sine=frequency=220:duration=12",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(video))
+    run("-f", "lavfi", "-i", "sine=frequency=880:duration=1.5", str(audio_dir / "audio_5.00_ab.mp3"))
+    quips = [
+        {"timestamp": 5.0, "text": "Inside the trim", "audio_url": "http://h/uploads/audio/x/audio_5.00_ab.mp3", "duration_sec": 1.5},
+        {"timestamp": 1.0, "text": "Before the trim", "audio_url": None, "duration_sec": None},
+    ]
+    out = await export_module.render_export(job_id, str(video), quips, True, aspect="9:16", start=4.0, end=10.0)
+    assert out == export_module.export_file(job_id, True, "9:16", 4.0, 10.0)
+    cap = cv2.VideoCapture(out)
+    assert (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))) == (202, 360)  # 9:16 of 360 high
+    assert cap.get(cv2.CAP_PROP_FRAME_COUNT) == pytest.approx(60, abs=3)
+    cap.release()
+    probe = subprocess.run([ffmpeg, "-hide_banner", "-i", out], capture_output=True, text=True).stderr
+    assert "Duration: 00:00:06.0" in probe and "Audio: aac" in probe
+    assert await export_module.render_export(job_id, str(video), quips, True, aspect="9:16", start=4.0, end=10.0) == out  # cached
+    assert await export_module.render_export(job_id, str(video), quips, True, aspect="9:16") != out

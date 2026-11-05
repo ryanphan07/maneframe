@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import uuid
+from urllib.parse import quote
 from typing import NamedTuple, Optional
 
 from fastapi import FastAPI, File, Form, Request, UploadFile, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
@@ -13,7 +14,7 @@ from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.services.export import ExportError, render_export
+from app.services.export import ExportError, check_options, render_export
 from app.services import labels as label_service
 from app.services import llm as llm_service
 from app.services import tts as tts_service
@@ -179,7 +180,7 @@ async def job_video(job_id: str):
     return FileResponse(job.video_path, media_type=job.video_media_type)
 
 
-async def _rendered_export(job_id: str, captions: bool) -> str:
+async def _rendered_export(job_id: str, captions: bool, aspect: str, start: Optional[float], end: Optional[float]) -> str:
     try:
         job = job_store.get(job_id)
     except JobNotFoundError:
@@ -188,25 +189,56 @@ async def _rendered_export(job_id: str, captions: bool) -> str:
         raise HTTPException(status_code=409, detail="The commentary is not ready yet.")
     quips = [q.model_dump() for q in job.result.quips]
     try:
-        return await render_export(job_id, job.video_path, quips, captions)
+        check_options(aspect, start, end)
+        # the options are passed only when set, so a plain export calls render_export exactly as before
+        options = {}
+        if aspect != "original":
+            options["aspect"] = aspect
+        if start is not None:
+            options["start"] = start
+        if end is not None:
+            options["end"] = end
+        return await render_export(job_id, job.video_path, quips, captions, **options)
     except ExportError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e))
 
 
+def _secs(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _export_query(captions: bool, aspect: str, start: Optional[float], end: Optional[float]) -> str:
+    query = f"captions={int(captions)}"
+    if aspect != "original":
+        query += f"&aspect={quote(aspect)}"
+    if start is not None:
+        query += f"&start={_secs(start)}"
+    if end is not None:
+        query += f"&end={_secs(end)}"
+    return query
+
+
 @app.post("/api/jobs/{job_id}/export")
-async def start_export(job_id: str, captions: bool = True):
-    """Render the finished job's mp4 now (cached for the download) and return its download URL."""
-    await _rendered_export(job_id, captions)
-    return {"url": f"/api/jobs/{job_id}/export.mp4?captions={int(captions)}"}
+async def start_export(job_id: str, captions: bool = True, aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None):
+    """Render the finished job's mp4 now (cached for the download) and return its download URL. `aspect` is original
+    or 9:16; `start` and `end` (seconds) trim the clip; a bad value is a 400."""
+    await _rendered_export(job_id, captions, aspect, start, end)
+    return {"url": f"/api/jobs/{job_id}/export.mp4?{_export_query(captions, aspect, start, end)}"}
 
 
 @app.get("/api/jobs/{job_id}/export.mp4")
-async def export_job(job_id: str, captions: bool = True):
-    """The rendered mp4 (original audio ducked under the commentary, optional burned-in captions); renders it if needed."""
-    path = await _rendered_export(job_id, captions)
+async def export_job(job_id: str, captions: bool = True, aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None):
+    """The rendered mp4 (original audio ducked under the commentary, optional burned-in captions, optional 9:16 crop
+    and trim); renders it if needed."""
+    path = await _rendered_export(job_id, captions, aspect, start, end)
     job = job_store.get(job_id)
     original = os.path.basename(job.video_path).removeprefix(f"{job_id}_")
-    return FileResponse(path, media_type="video/mp4", filename=f"maneframe_{os.path.splitext(original)[0]}.mp4")
+    suffix = ""
+    if aspect != "original":
+        suffix += "_" + aspect.replace(":", "x")
+    if start is not None or end is not None:
+        suffix += f"_{_secs(start or 0)}-{'end' if end is None else _secs(end)}s"
+    return FileResponse(path, media_type="video/mp4", filename=f"maneframe_{os.path.splitext(original)[0]}{suffix}.mp4")
 
 
 def _csv_response(text: str) -> Response:
