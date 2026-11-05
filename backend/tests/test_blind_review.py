@@ -17,14 +17,22 @@ def test_wilson_known_values():
     assert hi == pytest.approx(1.0) and lo < 0.8
 
 
-def test_parse_verdicts_types_and_reasons():
-    got = br.parse_verdicts("# note\n1 yes\n2 no pose wrong lion reared\n3 UNCLEAR face ears\n4 no because it moved\n")
-    assert got[1] == ("yes", "", "")
-    assert got[2] == ("no", "pose", "wrong lion reared")
-    assert got[3] == ("unclear", "face", "ears")
-    assert got[4] == ("no", "", "because it moved")
+def test_parse_verdicts_types_notable_and_reasons():
+    got = br.parse_verdicts("# note\n1 yes nt\n2 no pose wrong lion reared\n3 UNCLEAR face bo ears\n4 no because it moved\n5 no named nt 7-star not shown\n6 yes bo nt\n")
+    assert got[1] == ("yes", "", "", "yes")
+    assert got[2] == ("no", "pose", "wrong lion reared", "")
+    assert got[3] == ("unclear", "face", "ears", "no")
+    assert got[4] == ("no", "", "because it moved", "")
+    assert got[5] == ("no", "named", "7-star not shown", "yes")
+    assert got[6] == ("yes", "", "nt", "no")  # a second notable token is text, not a second answer
     with pytest.raises(ValueError):
         br.parse_verdicts("5 maybe")
+
+
+def test_mistake_words_match_claims_of_a_mistake():
+    for text in ("Yikes, someone had an oopsie", "That lion is lost", "Yellow is behind the beat", "forgot the choreography"):
+        assert br.MISTAKE_WORDS.search(text), text
+    assert not br.MISTAKE_WORDS.search("Blue rears up beside the drummers")
 
 
 def test_format_facts_pairs_entries_with_frame_times():
@@ -63,3 +71,29 @@ def test_every_script_csv_file_is_written_and_read_as_utf8_sig():
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if 'newline=""' in line:
                 assert 'encoding="utf-8-sig"' in line, f"{path.name}:{n} opens a csv without utf-8-sig"
+
+
+def test_humor_sheet_hides_origin_and_has_empty_rating_column(tmp_path, monkeypatch):
+    import csv
+
+    monkeypatch.setattr(br, "BLIND_DIR", tmp_path / "blind")
+    monkeypatch.setattr(br, "HUMOR_DIR", tmp_path / "humor")
+    pool = tmp_path / "blind" / "p"
+    pool.mkdir(parents=True)
+    with open(pool / "key.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["id", "arm", "source", "prompt_hash", "window", "image"])
+        for i in range(1, 9):
+            w.writerow([i, "old" if i <= 4 else "new", "x.csv", "h", 1, ""])
+    with open(pool / "sheet.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["id", "clip", "t", "text"])
+        for i in range(1, 9):
+            w.writerow([i, "a.mp4", "1.0", f"Blue’s line {i}"])
+    br.humor("p", ["baseline=old", "new=new"], 3, 1)
+    out = tmp_path / "humor" / "p"
+    rows = list(csv.DictReader(open(out / "sheet.csv", encoding="utf-8-sig")))
+    key = list(csv.DictReader(open(out / "key.csv", encoding="utf-8-sig")))
+    assert len(rows) == 6 and all(r["rating (1-5)"] == "" for r in rows)
+    assert sorted(k["group"] for k in key) == ["baseline"] * 3 + ["new"] * 3
+    assert "arm" not in rows[0] and "group" not in rows[0]
