@@ -88,3 +88,15 @@ def test_parse_log_attributes_llm_lines_by_job_id():
     assert [w["seconds"] for w in jobs["aaa111"]["windows"]] == [3.0]
     assert [w["seconds"] for w in jobs["bbb222"]["windows"]] == [4.0]
     assert jobs["aaa111"]["windows"][0]["label"] == "window 1/1"
+
+
+def test_resolve_log_default_and_err_fallback(tmp_path):
+    out, err = tmp_path / "backend.log", tmp_path / "backend.log.err"
+    out.write_text("uvicorn stdout, no job lines")
+    err.write_text(LOG)
+    assert benchmark.resolve_log(str(out)) == err  # start.ps1 stdout file -> its .err sibling
+    assert benchmark.resolve_log(str(err)) == err
+    other = tmp_path / "other.log"
+    other.write_text(LOG)
+    assert benchmark.resolve_log(str(other)) == other
+    assert benchmark.resolve_log(None).name == "backend.log.err"

@@ -1,7 +1,10 @@
 """Benchmark the running backend on real clips and append a dated section to docs/BENCHMARKS.md.
 
 Run from backend/ with the venv active and uvicorn already serving:
-    python scripts/benchmark.py --log ../bench_backend.log [--warm-first] [--style deadpan]
+    python scripts/benchmark.py [--log ../logs/backend.log.err] [--warm-first] [--style deadpan]
+
+--log defaults to logs/backend.log.err, where start.ps1 sends uvicorn's output (the logging module writes to stderr).
+If the file you pass has no job lines but "<file>.err" does (e.g. logs/backend.log), the .err file is used.
 
 Window timings and the Shifting/Dropping/TTS-failed counts come from the backend log. The per-window LLM lines
 carry the job id ("LLM window 1/2 (job <id>): ..."), so they are attributed by it. The other lines have no id, so
@@ -44,6 +47,23 @@ CREATED_RE = re.compile(r"Created job (\w+)")
 LLM_RE = re.compile(
     r"LLM (?P<label>.+?)(?: \(job (?P<job>\w+)\))?: frames=(?P<frames>\d+) prompt_tokens=(?P<pt>\S+) completion_tokens=(?P<ct>\S+) seconds=(?P<sec>[\d.]+)"
 )
+
+
+def resolve_log(arg: Optional[str]) -> Path:
+    """The backend log to parse: --log if given, else start.ps1's logs/backend.log.err. Falls back to "<file>.err"
+    when the given file has no job lines (start.ps1 keeps stdout in backend.log and uvicorn's logging in .err)."""
+    path = Path(arg) if arg else REPO_DIR / "logs" / "backend.log.err"
+
+    def has_jobs(p: Path) -> bool:
+        try:
+            return "Created job" in p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+
+    alt = path.with_name(path.name + ".err")
+    if not has_jobs(path) and has_jobs(alt):
+        return alt
+    return path
 
 
 def parse_log(text: str) -> Dict[str, Dict[str, Any]]:
@@ -251,7 +271,7 @@ def main() -> int:
     parser.add_argument("--clips", nargs="+", default=DEFAULT_CLIPS)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--out", default=str(REPO_DIR / "docs" / "BENCHMARKS.md"))
-    parser.add_argument("--log", default=None, help="backend log file, for window timings and Shifting/Dropping/TTS failed counts")
+    parser.add_argument("--log", default=None, help="backend log file (default logs/backend.log.err, what start.ps1 writes), for window timings and Shifting/Dropping/TTS failed counts")
     parser.add_argument("--style", default=None, help="commentary style sent with each upload (server default when omitted)")
     parser.add_argument("--warm-first", action="store_true", help='run the first clip again at the end, labelled "warm (prompt cache)"')
     args = parser.parse_args()
@@ -280,15 +300,16 @@ def main() -> int:
         f"Phase seconds come from polling every {POLL_SECONDS:.0f} s (about +/-{POLL_SECONDS:.0f} s). Total is wall clock from upload accepted to the first poll that saw `completed`/`error`. "
         "Overlap = consecutive audio quips where timestamp + duration_sec exceeds the next timestamp by more than 0.05 s.",
     ]
-    if args.log:
-        log_jobs = parse_log(Path(args.log).read_text(encoding="utf-8", errors="replace"))
+    log_path = resolve_log(args.log)
+    if log_path.is_file():
+        log_jobs = parse_log(log_path.read_text(encoding="utf-8", errors="replace"))
         for r in rows:
             info = log_jobs.get(r["job_id"] or "")
             if info:
                 r.update(windows=info["windows"], shifting=info["shifting"], dropping=info["dropping"], tts_failed=info["tts_failed"])
-        notes.append(f"Window, token and Shifting/Dropping/TTS failed columns are from `{Path(args.log).name}`; n/a means the job was not found in the log.")
+        notes.append(f"Window, token and Shifting/Dropping/TTS failed columns are from `{log_path.name}`; n/a means the job was not found in the log.")
     else:
-        notes.append("No --log given: window timings and log counts are n/a.")
+        notes.append(f"Backend log `{log_path}` not found: window timings and log counts are n/a.")
     per_window = [
         f"- {r['label']}: " + ", ".join(f"{w['seconds']:.1f}s" for w in r["windows"])
         for r in rows if r.get("windows")
