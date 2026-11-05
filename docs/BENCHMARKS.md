@@ -202,3 +202,22 @@ Long-clip notes (hoco2026.MOV, labeled row above; the row is the 1080p copy, not
 - Peak backend memory (python.exe, PeakWorkingSet64 read after the run and export, Kokoro loaded): 811 MB. llama-server and ffmpeg are separate processes and were not measured.
 - Export with captions (`POST /api/jobs/{id}/export?captions=1`): 68.8 s to render, 127.2 MB output (1080p, 326.6 s).
 
+
+## 2026-11-05 (session 46: where the time per LLM call goes, and llama-server flags)
+
+Setup: Qwen3.6-35B-A3B-UD-Q3_K_XL + mmproj-F16, llama-b10679 Vulkan, `-c 8192 -np 1 -ngl 99 --jinja`, port 8090, hoco_40s.mp4 (4 windows, 6 frames at width 896), hype style, default settings, 2 runs per config on a warm server (the first call of run 1 also starts with an empty prompt cache). Per-call numbers from llama-server's `timings` object, now logged by `services/llm.py` (`prompt_n` = prompt tokens actually processed, `cache_n` = tokens served from the prompt cache, `prompt_ms`, `predicted_n`, `predicted_ms`).
+
+Timing breakdown, baseline, calls 2+ (typical): 6150 prompt tokens in total = 3716 from cache + about 2440 processed (the 6 images and the window text); prompt processing 36 to 38 s (about 65 tokens/s), generation about 120 tokens in 6 to 8.5 s (about 16 tokens/s), wall 42 to 47 s. Prompt processing is about 82% of a call, generation about 17%.
+- The system prompt is reused: call 1 of a fresh server has `cache_n=0` (6002 tokens, 60 s prompt, 74 s wall); every later call, including call 1 of the next job, has `cache_n=3716`. Only the images and per-window text are processed each time, and they cannot be cached. No fix needed.
+
+| Config (flags added to the base command) | Run 1 mean s/call (all 4 / calls 2-4) | Run 2 mean s/call | vs baseline |
+|---|---|---|---|
+| baseline (defaults: `-b 2048 -ub 512`, `-fa auto`) | 53.0 / 46.0 | 44.1 | n/a |
+| `-b 2048 -ub 2048` | 53.0 / 44.9 | 44.0 | 0% |
+| `-fa on` | 49.0 / 43.4 | 42.6 | -3% (run 2), -8% (run 1, mostly a faster cold call) |
+| `--cache-reuse 256` | 49.2 / 43.3 | 42.6 | -3% |
+
+- No flag reaches the 10% bar on both runs, so none was adopted. All runs completed with no retries and normal quips.
+- `-b` is already 2048 by default; the real change was `-ub 2048`. `--cache-reuse` is disabled by this build for multimodal models ("cache_reuse is not supported by multimodal, it will be disabled" in the llama-server log), so that row is a no-op and its difference is run-to-run noise.
+- Caveat: the three trials ran against one backend process that was not restarted between them, so their backend log lines all landed in `trial_ub2048.backend.log.err` (jobs in order: ub2048, fa, reuse). Flags were confirmed only by the command line (llama-server prints no flash-attention line at its default verbosity).
+- Conclusion: the cost is image prefill at about 65 tokens/s on this Vulkan build, which the flags tried do not change. Cutting it needs fewer or smaller image tokens (`FRAMES_PER_WINDOW`, `FRAME_WIDTH`), which this session did not touch because they affect quality.
