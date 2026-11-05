@@ -31,9 +31,15 @@ class Settings(BaseSettings):
     MAX_QUIPS_PER_WINDOW: int = 3
     MIN_QUIP_GAP_SEC: float = 4.5  # measured TTS: about 4.5 s for an 8-word line
 
-    TTS_ENGINE: Literal["edge", "piper"] = "edge"  # edge: online edge-tts (mp3); piper: offline CPU voice (wav), see README
+    TTS_ENGINE: Literal["edge", "piper", "kokoro"] = "edge"  # edge: online edge-tts (mp3); piper, kokoro: offline CPU voices (wav), see README
     PIPER_MODEL_PATH: str = "models/piper/en_US-lessac-medium.onnx"  # relative paths start at the repo root; the folder is git-ignored
     PIPER_LENGTH_SCALE: float = 0.9  # below 1 speaks faster (edge's +10% is about 0.9)
+    KOKORO_MODEL_PATH: str = "models/kokoro/kokoro-v1.0.onnx"  # relative paths start at the repo root; the folder is git-ignored
+    KOKORO_VOICES_PATH: str = "models/kokoro/voices-v1.0.bin"
+    KOKORO_VOICE: str = "af_nicole"  # one voice, or a blend such as "af_nicole:0.7,af_bella:0.3" (weights are normalized)
+    KOKORO_SPEED: float = 1.0
+    KOKORO_LANG: str = "en-us"
+    KOKORO_GAIN_DB: float = 0.0  # fixed gain applied at synthesis (peak limited to -1 dBFS); no other processing
     TTS_VOICE: str = "en-US-GuyNeural"
     TTS_RATE: str = "+10%"
     TTS_ENABLED: bool = True

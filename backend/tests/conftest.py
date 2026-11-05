@@ -26,6 +26,7 @@ def isolated_data_dirs(tmp_path_factory, monkeypatch):
     (uploads / "audio").mkdir()
     monkeypatch.setattr(settings, "UPLOAD_DIR", str(uploads))
     monkeypatch.setattr(settings, "LABELS_DIR", str(root / "labels"))
+    monkeypatch.setattr(settings, "TTS_ENGINE", "edge")  # backend/.env may select another engine; engine tests set their own
     monkeypatch.setattr(main_module, "VIDEO_DIR", str(uploads / "videos"))
     monkeypatch.setattr(main_module, "AUDIO_DIR", str(uploads / "audio"))
     yield

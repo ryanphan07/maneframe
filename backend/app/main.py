@@ -16,6 +16,7 @@ from app.config import settings
 from app.services.export import ExportError, render_export
 from app.services import labels as label_service
 from app.services import llm as llm_service
+from app.services import tts as tts_service
 from app.services.jobs import TERMINAL, JobNotFoundError, job_store
 from app.services.pipeline import cleanup_job_files, purge_expired_jobs, run_pipeline, sweep_uploads
 from app.services.video_processor import validate_upload_metadata, sanitize_filename
@@ -40,6 +41,7 @@ async def _cleanup_loop() -> None:
 @contextlib.asynccontextmanager
 async def lifespan(_: FastAPI):
     llm_service.load_system_prompt()  # fail at startup, not on the first window, if a prompt file is missing
+    tts_service.validate_tts_config()  # a bad KOKORO_VOICE fails here, with the valid list
     await asyncio.to_thread(sweep_uploads)
     task = asyncio.create_task(_cleanup_loop())
     try:

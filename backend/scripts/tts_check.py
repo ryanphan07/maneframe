@@ -2,7 +2,7 @@
 
 Usage (from the repo root, venv active):
     python backend/scripts/tts_check.py
-Uses the current settings (backend/.env): voice, rate, retries, timeout. Needs internet.
+Uses the current settings (backend/.env): TTS_ENGINE (edge needs internet; piper and kokoro run offline), voice, rate, retries, timeout.
 """
 import asyncio
 import os
@@ -26,7 +26,8 @@ VIDEO_ID = "ttscheck"
 
 
 async def main() -> int:
-    print(f"voice={settings.TTS_VOICE} rate={settings.TTS_RATE} retries={settings.TTS_RETRIES} timeout={settings.TTS_TIMEOUT_SECONDS}s")
+    voice = {"kokoro": settings.KOKORO_VOICE, "piper": settings.PIPER_MODEL_PATH}.get(settings.TTS_ENGINE, settings.TTS_VOICE)
+    print(f"engine={settings.TTS_ENGINE} voice={voice} rate={settings.TTS_RATE} retries={settings.TTS_RETRIES} timeout={settings.TTS_TIMEOUT_SECONDS}s")
     audio_dir = os.path.join(settings.UPLOAD_DIR, "audio", VIDEO_ID)
     failures = 0
     for i, text in enumerate(LINES, 1):
