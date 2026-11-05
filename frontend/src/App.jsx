@@ -15,6 +15,24 @@ const POLL_INTERVAL_MS = 5000;
 const PARTIAL_FETCH_INTERVAL_MS = 2000;
 const MAX_POLL_FAILURES = 60; // about 5 minutes without reaching the server
 
+const STORAGE_KEY = 'maneframe.job';
+const SERVER_VIDEO_READY = ['analyzing', 'synthesizing', 'completed']; // before this GET /api/jobs/{id}/video answers 409
+
+const saveJob = (job) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(job)); } catch { /* storage unavailable: no resume */ }
+};
+const clearJob = () => {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+};
+const loadJob = () => {
+  try {
+    const job = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return job && typeof job.jobId === 'string' && job.jobId ? job : null;
+  } catch {
+    return null;
+  }
+};
+
 const styleLabel = (value) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const PHASE_LABELS = {
@@ -49,6 +67,8 @@ function App() {
   const [styles, setStyles] = useState([]);
   const [style, setStyle] = useState('');
   const [maxUploadMb, setMaxUploadMb] = useState(null);
+  const [resumed, setResumed] = useState(false); // the job came from localStorage: play the server's copy, there is no local blob
+  const [notice, setNotice] = useState('');
 
   const socketRef = useRef(null);
   const reconnectTimerRef = useRef(null);
@@ -218,6 +238,49 @@ function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // After a page refresh: pick up the job saved when the upload started.
+  useEffect(() => {
+    const saved = loadJob();
+    if (!saved) return undefined;
+    let cancelled = false;
+    axios.get(`${API_BASE}/api/jobs/${saved.jobId}`).then(({ data }) => {
+      if (cancelled) return;
+      jobIdRef.current = saved.jobId;
+      setResumed(true);
+      setExportJob({ jobId: saved.jobId, fileName: exportFileName(saved.fileName || 'clip') });
+      if (saved.style) setStyle(saved.style);
+      if (data.status === 'error') {
+        clearJob();
+        setNotice('');
+        setResumed(false);
+        setExportJob(null);
+        jobIdRef.current = null;
+        fail(data.message || 'Video analysis failed.');
+      } else if (data.status === 'completed') {
+        terminalRef.current = true;
+        setStatusMessage(data.message || '');
+        fetchResult(saved.jobId);
+      } else {
+        setProcessingStatus(data.status);
+        setProgress(data.progress ?? 0);
+        setStatusMessage(data.message || '');
+        if (data.result?.partial) {
+          setCommentaryQuips(data.result.partial.quips || []);
+          setReadyUntil(data.result.partial.ready_until || 0);
+        }
+        closedRef.current = false;
+        connectSocket(saved.jobId);
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      if (error?.response?.status === 404) {
+        clearJob();
+        setNotice('Your previous job is no longer on the server (it expired or the server restarted). Upload the clip again.');
+      } // any other failure (server down): keep the saved job so the next refresh can try again
+    });
+    return () => { cancelled = true; };
+  }, [connectSocket, fail, fetchResult]);
+
   useEffect(() => {
     return () => {
       teardownSocket();
@@ -253,6 +316,9 @@ function App() {
     setStatusMessage('');
     setProgress(0);
     setExportJob(null);
+    setResumed(false);
+    setNotice('');
+    clearJob();
     setProcessingStatus('uploading');
 
     const formData = new FormData();
@@ -263,6 +329,7 @@ function App() {
       const { data } = await axios.post(`${API_BASE}/api/upload`, formData);
       const jobId = data.job_id;
       jobIdRef.current = jobId;
+      saveJob({ jobId, fileName: file.name, style });
       setExportJob({ jobId, fileName: exportFileName(file.name) });
 
       const url = URL.createObjectURL(file);
@@ -301,6 +368,9 @@ function App() {
     }
   };
 
+  const playUrl = resumed
+    ? (SERVER_VIDEO_READY.includes(processingStatus) && exportJob ? `${API_BASE}/api/jobs/${exportJob.jobId}/video` : null)
+    : videoUrl;
   const inFlight = processingStatus !== 'idle' && processingStatus !== 'completed' && processingStatus !== 'error';
 
   return (
@@ -343,6 +413,8 @@ function App() {
           </div>
         )}
 
+        {notice && <div role="status" style={{ margin: '1rem 0' }}>{notice}</div>}
+
         {errorMessage && (
           <div role="alert" style={{ margin: '1rem 0', padding: '0.5rem 1rem', background: '#fdecea', border: '1px solid #f5c2c0', borderRadius: '4px', color: '#8a1c17' }}>
             {errorMessage}
@@ -367,11 +439,11 @@ function App() {
           </div>
         )}
 
-        {videoUrl && (
+        {playUrl && (
           <div>
             <VideoPlayer
-              key={videoUrl}
-              videoUrl={videoUrl}
+              key={playUrl}
+              videoUrl={playUrl}
               jobId={exportJob?.jobId}
               apiBase={API_BASE}
               commentaryQuips={commentaryQuips}

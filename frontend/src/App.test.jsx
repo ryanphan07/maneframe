@@ -24,6 +24,7 @@ const stylesResponse = { data: { styles: ['hype', 'deadpan', 'broadcast'], defau
 
 let clock;
 beforeEach(() => {
+  localStorage.clear(); // a job saved by one test must not be resumed by the next
   FakeSocket.instances = [];
   vi.stubGlobal('WebSocket', FakeSocket);
   URL.createObjectURL = vi.fn(() => 'blob:local');
@@ -143,5 +144,71 @@ describe('progressive results', () => {
     await act(async () => { socket.send({ status: 'error', progress: 30, message: 'boom' }); });
     await act(async () => { release(); });
     expect(screen.queryByText(/late quip/)).not.toBeInTheDocument();
+  });
+});
+
+describe('resume after a page refresh', () => {
+  const saved = { jobId: 'j9', fileName: 'big.mov', style: 'deadpan' };
+  const serve = (jobResponse) => {
+    axios.get.mockImplementation((url) => {
+      if (url.endsWith('/api/styles')) return Promise.resolve(stylesResponse);
+      if (url.endsWith('/labels')) return Promise.resolve({ data: { labels: [], label_options: [], qualities: [] } });
+      return jobResponse;
+    });
+  };
+
+  it('stores the job id, filename and style when an upload starts, and clears it on the next upload', async () => {
+    axios.get.mockResolvedValue(stylesResponse);
+    axios.post.mockResolvedValueOnce({ data: { job_id: 'j1' } }).mockResolvedValueOnce({ data: { job_id: 'j2' } });
+    const { container } = render(<App />);
+    await waitFor(() => expect(screen.getByLabelText('Commentary style')).toHaveValue('hype'));
+    const input = container.querySelector('input[type="file"]');
+    await act(async () => { fireEvent.change(input, { target: { files: [new File(['x'], 'clip.mp4', { type: 'video/mp4' })] } }); });
+    expect(JSON.parse(localStorage.getItem('maneframe.job'))).toEqual({ jobId: 'j1', fileName: 'clip.mp4', style: 'hype' });
+
+    // the next upload clears the entry before the new job id is known
+    axios.post.mockImplementationOnce(() => { expect(localStorage.getItem('maneframe.job')).toBeNull(); return Promise.resolve({ data: { job_id: 'j2' } }); });
+    await act(async () => { FakeSocket.instances[0].send({ status: 'error', progress: 0, message: 'x' }); });
+    await act(async () => { fireEvent.change(input, { target: { files: [new File(['x'], 'next.mp4', { type: 'video/mp4' })] } }); });
+    expect(JSON.parse(localStorage.getItem('maneframe.job')).jobId).toBe('j2');
+  });
+
+  it('reconnects the WebSocket and shows partial quips for a running job', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.resolve(partialJob([quip(1, 'resumed quip')])));
+    const { container } = render(<App />);
+    expect(await screen.findByText(/resumed quip/)).toBeInTheDocument();
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    expect(FakeSocket.instances[0].url).toContain('/ws/analyze/j9');
+    expect(container.querySelector('video').getAttribute('src')).toContain('/api/jobs/j9/video');
+    await waitFor(() => expect(screen.getByLabelText('Commentary style')).toHaveValue('deadpan'));
+  });
+
+  it('shows the result and plays the server copy for a completed job', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.resolve({ data: { status: 'completed', progress: 100, result: { quips: [quip(2, 'done quip')], total_windows: 3, skipped: [] } } }));
+    const { container } = render(<App />);
+    expect(await screen.findByText(/done quip/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download video' })).toBeInTheDocument();
+    expect(container.querySelector('video').getAttribute('src')).toContain('/api/jobs/j9/video');
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it('clears the saved job and shows a notice when the server answers 404', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.reject({ response: { status: 404 } }));
+    const { container } = render(<App />);
+    expect(await screen.findByRole('status')).toHaveTextContent(/no longer on the server/);
+    expect(localStorage.getItem('maneframe.job')).toBeNull();
+    expect(container.querySelector('video')).toBeNull();
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it('keeps the saved job when the server is unreachable', async () => {
+    localStorage.setItem('maneframe.job', JSON.stringify(saved));
+    serve(Promise.reject(new Error('network')));
+    render(<App />);
+    await waitFor(() => expect(axios.get).toHaveBeenCalledWith(expect.stringContaining('/api/jobs/j9')));
+    expect(localStorage.getItem('maneframe.job')).not.toBeNull();
   });
 });
