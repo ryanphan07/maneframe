@@ -271,3 +271,40 @@ Failure types (lines not yes): s2 unread 31, pose 10, named 5, inv 4, who 3, fac
 - Arm s: owner mean on arm s lines >= anchor mean + 0.7, and grounding rule (b) (holds: 68% vs 53%).
 - Arm s2: owner mean on s2 lines >= anchor mean + 0.7, and >= arm s mean + 0.3, and pooled grounded no more than 10 points below the drift sample (holds: 55% vs 50%).
 - The best passing arm goes into `hype.txt`. If s2 wins, its rotation later moves into `llm.py` for real jobs and the term file into `prompts/`.
+
+
+# Session 45: arm r2 (arm r rules plus a micro-motion ban)
+
+Sessions 38-44 did not run r2 (checked: no mention in this file, TASKS.md or the scripts). `hype.txt` has not changed since its first commit, so the baseline is the current default (prompt hash 5d0d5557: glossary and examples on, 6 frames at 896 px, LLM_CTX 8192).
+
+## Setup
+- Rules file `backend/scripts/eval_arms/r2_narrow_micro_rules.txt`, appended to hype with `--rules-file` (hash 3ceb3f89): arm r's two rules (no head-shake plays, no face/eye/gaze/ear/expression claims; empty stage or ended dance: say so, never invent what comes next) plus: no claims about movements stills cannot show (stirs, twitches, wiggles, bobs, stretches, shakes, nods, "lifts its head"); describe only a single-frame pose or a clear change between frames.
+- 35B UD-Q3_K_XL, llama-server on port 8090 (8080 is held by Docker/Airflow), `LLM_BASE_URL` by environment variable only; 5-clip set with `--prepared-dir`, defaults otherwise. Runs `eval/results/s45b1`, `s45b2` (baseline, rerun now so seconds and tokens are recorded) and `s45r1`, `s45r2` (r2).
+- Low-memory note: Claude Code reaped the background shell that wrapped the run chain during r2 run 2 (free RAM was about 0.5 GB). The eval processes were already detached and kept running, and run 2 finished normally (60 lines, 20 windows, stats.json written), so nothing was rerun. The 4 runs were sequential, one at a time.
+- One blind pool `pool_s45` (237 lines: both baseline runs and both r2 runs, shuffled, arm only in `key.csv`), one judge (this session), rubric v3 with the session 39 addendum, judged from the pages, then un-blinded. Decision rule as in session 37: r2 wins only if it beats baseline by >= 10 points on each of its 2 runs and stays within 1.5x baseline seconds per window.
+
+## Results
+| | lines | yes | no | unclear | grounded (Wilson 95%) | notable | s/window | prompt tokens mean (max) |
+|---|---|---|---|---|---|---|---|---|
+| baseline A | 59 | 30 | 7 | 22 | 51% (38-63) | 22% | 42.3 | 5707 (6318) |
+| baseline B | 59 | 31 | 16 | 12 | 53% (40-65) | 20% | 40.0 | 5707 (6358) |
+| baseline pooled | 118 | 61 | 23 | 34 | 52% | 21% | 41.2 | 5707 |
+| r2 run 1 | 59 | 33 | 12 | 14 | 56% (43-68) | 17% | 44.6 | 5887 (6494) |
+| r2 run 2 | 60 | 28 | 15 | 17 | 47% (35-59) | 18% | 40.8 | 5892 (6525) |
+| r2 pooled | 119 | 61 | 27 | 31 | 51% | 18% | 42.7 | 5890 |
+
+Failure types (lines not yes), baseline pooled vs r2 pooled: unread 20 vs 4, inv 22 vs 27, pose 9 vs 15, named 1 vs 8, face 4 vs 2, who 1 vs 2. Mistake-claim words: 0 in all four runs. The extra rule text adds about 180 prompt tokens; headroom at the largest call is 8192 - 6525 - 500 = 1167 tokens.
+
+## Verdict: not a winner (defaults unchanged, `hype.txt` untouched)
+- Grounding: +5 and +3 points on run 1 and -4 and -6 on run 2 against the matched baseline runs (+4/-5 against the pooled 52%). The rule needs +10 on each run, so it fails. The pooled rates are the same (51% vs 52%); run-to-run noise on this set is about 13 points.
+- Time: 44.6 and 40.8 s per window against 42.3 and 40.0, 1.05x and 1.02x, so it passes the 1.5x limit.
+- What it did: it removed the micro-motion lines it targeted ("unread" 20 to 4; lines containing a micro-motion word such as stretch, shake, wiggle, blink, sneeze: 18 in the two baseline runs, 6 in the two r2 runs, by grep, so the ban reduced but did not remove them). But the lines moved into other buckets rather than becoming grounded: named moves the strips do not show rose from 1 to 8 ("horse stance", "bowing", "splits", "7-star head spins"), wrong pose from 9 to 15, invented events from 22 to 27. Banning what the model cannot see did not make it see better; it replaced one kind of unsupported claim with another, as arm r did with face claims (session 37).
+- Baseline note: this baseline (52%, 118 lines, two runs) matches the session 38 default (55%) and its own two earlier judgments within noise.
+- Notable share fell slightly (21% to 18%), inside noise.
+
+Examples (arm shown after un-blinding):
+- 05_ending t=36.0, r2: "Stage is empty. Just lights and a banner." yes, notable (empty-stage lines in r2: 5 yes, 1 no, the no being drummers still carrying the drum off).
+- 04_action t=32.0 and t=30.5, r2: "Pink and blue lions enter their 7-star head spins!" no, named.
+- 02_drummers t=14.2, baseline: "That head shake is pure attitude." unclear, unread (the kind r2 removed).
+
+Open for the owner: nothing was changed. The pending humor change on `hype.txt` (pool_s40) is independent of this result; r2's rule text would only be worth adding if a later arm combines it with something that fixes pose and named-move errors (for example arm b's facts call), which this data does not support.
