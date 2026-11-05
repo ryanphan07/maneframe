@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import axios from 'axios';
 import { toast } from 'react-toastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +34,7 @@ beforeEach(() => {
   vi.spyOn(toast, 'error').mockImplementation(() => {});
 });
 afterEach(() => {
+  cleanup(); // unmount first: a still-mounted App must not call axios after the mocks are reset
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.resetAllMocks();
