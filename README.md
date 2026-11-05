@@ -35,7 +35,7 @@ Key design points:
 - Honest failure: a window the model fails on (after one retry) is skipped and reported ("skipped n of m parts" with the time ranges), never filled with invented text; if every window fails the job errors. A failed TTS clip only removes that line's audio.
 
 ## Requirements
-- Windows (developed natively on Windows 11), Python 3.12, Node 20+ (tested on 24).
+- Windows (developed natively on Windows 11), Python 3.12, Node 24 (CI and local tests run on 24; Node 20 fails to load undici 8, a Vitest dependency, and there is no `engines` field in `frontend/package.json`).
 - A running llama-server with a multimodal Qwen model and its mmproj file.
 - Internet access for edge-tts (an unofficial Microsoft endpoint; needs `edge-tts>=7.3.1`), or an offline voice (Piper or Kokoro, below).
 
