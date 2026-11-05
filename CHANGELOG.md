@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-Changes after the v0.2.0 tag. Test counts: 329 backend, 19 frontend (2026-11-05).
+Changes after the v0.2.0 tag. Test counts: 343 backend, 36 frontend (2026-11-05).
+
+- Export size options: `aspect=9:16` crops a vertical window centered on the motion box (static, no tracking) and scales it to 1080x1920 (source height if smaller), with captions in the lower third; `start` and `end` trim the clip (quips that start inside the range and finish by `end`, shifted). Optional query params on `POST /api/jobs/{id}/export` and `GET .../export.mp4`, defaults unchanged; 400 for bad values. The web app has a size choice and Start/End fields with Set start / Set end buttons next to "Download video".
 
 - Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole, `KOKORO_GAIN_DB`; `scripts/voice_samples.py` for auditioning; model and voice files go in the git-ignored `models/kokoro/`; setup in the README).
 - Uploads are also converted when the video is H.264 but its long side is above `TRANSCODE_MAX_SIDE` or it is HDR (HLG/PQ), through the same conversion path. Frame rate alone is no trigger. Tested on tiny generated clips only.
