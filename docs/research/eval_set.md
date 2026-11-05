@@ -40,3 +40,17 @@ Patterns worth acting on:
 
 ## Judging caveats
 One judge, strips at 1500 px wide where small lions are hard to read, and borderline calls (mid poses, idioms) sit with the judge: moving the five or six borderline lines changes a run's rate by about 8 points, which is the same size as the noise. The review sheets are in `logs/grounding/` (git-ignored) with a reason per line.
+
+## Owner funniness ratings (session 26 runs)
+The owner rated lines from the session 26 runs on `hoco_40s.mp4` (1 to 5, 5 funniest; `eval/results/s26-9b.csv`, `s26-35b.csv`):
+
+| model | style | rated | mean |
+|---|---|---|---|
+| 9B | hype | 11 | 2.45 |
+| 9B | deadpan | 12 | 2.67 |
+| 35B | hype | 12 | 2.75 |
+| 35B | deadpan | 12 | 2.75 |
+| both | hype | 23 | 2.61 |
+| both | deadpan | 24 | 2.71 |
+
+About 12 lines per cell, so the differences between styles and models are within noise.

@@ -55,3 +55,12 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 ### D4 skip limits (2026-10-29, session 21)
 - Skipping must not hide a broken run. The job fails immediately, without retry, when the model server is unreachable (connection refused, DNS, dropped; a timeout is not, since a slow server is retried and skipped like any other failure). It also fails as soon as more than half the windows are skipped, or 3 windows in a row are skipped. The error shown is the category message of the last failure.
 - Constants: `MAX_CONSECUTIVE_SKIPS` in `commentary.py`; the half rule is computed from `total_windows`.
+
+
+## 2026-11-04
+
+### D6. Phase 3 is local only
+- Distribution work in phase 3 stays local: no hosted service, no accounts, no uploads to a server we run.
+
+### D7. Default voice stays edge-tts
+- The default TTS voice stays edge-tts. The owner prefers it over Piper and finds both robotic; other voice options are still to be explored.
