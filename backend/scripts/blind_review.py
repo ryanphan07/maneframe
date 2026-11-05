@@ -72,7 +72,7 @@ def make(pool: str, clip_dir: Path, arms: List[str], samples: Dict[str, int], se
         sheet = gc.OUT_DIR / f"{csv_path.stem}.csv"
         if not sheet.exists():
             gc.extract(csv_path, clip_dir, gc.OUT_DIR)
-        with open(sheet, newline="", encoding="utf-8") as f:
+        with open(sheet, newline="", encoding="utf-8-sig") as f:
             rows = list(csv.DictReader(f))
         if label in samples:
             rows = rng.sample(rows, min(samples[label], len(rows)))
@@ -81,7 +81,7 @@ def make(pool: str, clip_dir: Path, arms: List[str], samples: Dict[str, int], se
     rng.shuffle(items)
     root = BLIND_DIR / pool
     (root / "pages").mkdir(parents=True, exist_ok=True)
-    with open(root / "sheet.csv", "w", newline="", encoding="utf-8") as f, open(root / "key.csv", "w", newline="", encoding="utf-8") as k:
+    with open(root / "sheet.csv", "w", newline="", encoding="utf-8-sig") as f, open(root / "key.csv", "w", newline="", encoding="utf-8-sig") as k:
         w = csv.writer(f)
         kw = csv.writer(k)
         w.writerow(["id", "clip", "t", "text"])
@@ -108,9 +108,9 @@ def make(pool: str, clip_dir: Path, arms: List[str], samples: Dict[str, int], se
 def unblind(pool: str) -> None:
     root = BLIND_DIR / pool
     verdicts = parse_verdicts((root / "verdicts.txt").read_text(encoding="utf-8"))
-    with open(root / "key.csv", newline="", encoding="utf-8") as f:
+    with open(root / "key.csv", newline="", encoding="utf-8-sig") as f:
         key = {int(r["id"]): r for r in csv.DictReader(f)}
-    with open(root / "sheet.csv", newline="", encoding="utf-8") as f:
+    with open(root / "sheet.csv", newline="", encoding="utf-8-sig") as f:
         sheet = {int(r["id"]): r for r in csv.DictReader(f)}
     missing = sorted(set(key) - set(verdicts))
     if missing:
@@ -129,7 +129,7 @@ def unblind(pool: str) -> None:
     for i in sorted(key):
         out_rows.append({**key[i], "clip": sheet[i]["clip"], "t": sheet[i]["t"], "text": sheet[i]["text"],
                          "verdict": verdicts[i][0], "ftype": verdicts[i][1], "reason": verdicts[i][2]})
-    with open(root / "unblinded.csv", "w", newline="", encoding="utf-8") as f:
+    with open(root / "unblinded.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=list(out_rows[0].keys()))
         w.writeheader()
         w.writerows(out_rows)

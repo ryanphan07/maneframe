@@ -46,3 +46,20 @@ def test_build_messages_adds_facts_only_when_given():
     plain = llm.build_messages(frames, 0, 10, [])[1]["content"][0]["text"]
     withf = llm.build_messages(frames, 0, 10, [], facts="FACTS HERE")[1]["content"][0]["text"]
     assert "FACTS HERE" not in plain and "FACTS HERE" in withf
+
+
+def test_csv_readers_accept_files_with_and_without_a_bom(tmp_path):
+    for name, enc in (("plain.csv", "utf-8"), ("bom.csv", "utf-8-sig")):
+        (tmp_path / name).write_text("clip,text\na.mp4,Blue’s turn\n", encoding=enc, newline="")
+    rows = ev.read_rows([tmp_path / "plain.csv", tmp_path / "bom.csv"])
+    assert [r["text"] for r in rows] == ["Blue’s turn"] * 2
+    assert all(list(r) == ["clip", "text"] for r in rows)  # no "﻿clip" key
+
+
+def test_every_script_csv_file_is_written_and_read_as_utf8_sig():
+    """Excel shows curly apostrophes as mojibake unless the file starts with a BOM; csv files are opened with newline=''."""
+    scripts = Path(__file__).resolve().parent.parent / "scripts"
+    for path in scripts.glob("*.py"):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if 'newline=""' in line:
+                assert 'encoding="utf-8-sig"' in line, f"{path.name}:{n} opens a csv without utf-8-sig"

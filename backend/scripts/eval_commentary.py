@@ -69,7 +69,7 @@ def format_summary(groups: List[Dict[str, object]]) -> str:
 def read_rows(paths: List[Path]) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     for path in paths:
-        with open(path, newline="", encoding="utf-8") as f:
+        with open(path, newline="", encoding="utf-8-sig") as f:
             rows.extend(csv.DictReader(f))
     return rows
 
@@ -273,7 +273,7 @@ async def run_eval(clips: List[str], styles: List[str], max_windows: Optional[in
     out = out_dir / f"{datetime.datetime.now():%Y%m%d-%H%M%S}.csv"
     total = 0
     window_log: List[Dict[str, object]] = []
-    with open(out, "w", newline="", encoding="utf-8") as f:
+    with open(out, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
         for clip in clips:

@@ -68,7 +68,7 @@ def extract(csv_path: Path, clip_dir: Path, out_root: Path) -> Path:
 
     from app.services import video_processor as vp
 
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     img_dir = out_root / csv_path.stem
     img_dir.mkdir(parents=True, exist_ok=True)
@@ -82,7 +82,7 @@ def extract(csv_path: Path, clip_dir: Path, out_root: Path) -> Path:
     sheet = out_root / f"{csv_path.stem}.csv"
     fields = list(rows[0].keys()) if rows else []
     fields += [c for c in SHEET_EXTRA if c not in fields]
-    with open(sheet, "w", newline="", encoding="utf-8") as f:
+    with open(sheet, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for i, row in enumerate(rows, 1):
@@ -130,7 +130,7 @@ def main() -> int:
     else:
         rows: List[Dict[str, str]] = []
         for p in args.sheets:
-            with open(p, newline="", encoding="utf-8") as f:
+            with open(p, newline="", encoding="utf-8-sig") as f:
                 rows.extend(csv.DictReader(f))
         print(format_tally(tally(rows)))
     return 0
