@@ -790,3 +790,28 @@ def test_sample_window_frames_keeps_frames_read_before_a_failed_read(monkeypatch
         frames = vp.sample_window_frames("x.mp4", 0.0, 4.0, 4, 64, None)
     assert len(frames) == 2
     assert "keeping the 2 frames" in caplog.text
+
+
+# ---- llama-server timings logging -----------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_call_logs_llama_server_timings(monkeypatch, caplog):
+    timings = {"cache_n": 5700, "prompt_n": 900, "prompt_ms": 2500.5, "predicted_n": 120, "predicted_ms": 1800.25}
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))],
+        usage=SimpleNamespace(prompt_tokens=6600, completion_tokens=120),
+        timings=timings,
+    )
+
+    async def create(**kwargs):
+        return response
+
+    monkeypatch.setattr(llm_module, "llm_client", SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    with caplog.at_level(logging.INFO, logger=llm_module.logger.name):
+        await llm_module._call([], 3, "window 1/2")
+    assert "prompt_n=900 cache_n=5700 prompt_ms=2500.5 predicted_n=120 predicted_ms=1800.25" in caplog.text
+
+
+def test_format_timings_handles_missing_data():
+    assert llm_module.format_timings(None) == "n/a"
+    assert "cache_n=?" in llm_module.format_timings({"prompt_n": 1})

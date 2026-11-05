@@ -232,6 +232,22 @@ def build_messages(
     ]
 
 
+def format_timings(timings: Any) -> str:
+    """llama-server's `timings` object as one log fragment (prompt_n, cache_n, prompt_ms, predicted_n, predicted_ms).
+
+    The openai client keeps unknown response fields as extras, so `timings` arrives as a dict or a model-like object.
+    Missing fields print as "?"; a server that sends no timings gives "n/a".
+    """
+    if not timings:
+        return "n/a"
+    get = timings.get if isinstance(timings, dict) else (lambda k: getattr(timings, k, None))
+    parts = []
+    for key in ("prompt_n", "cache_n", "prompt_ms", "predicted_n", "predicted_ms"):
+        value = get(key)
+        parts.append(f"{key}={'?' if value is None else value}")
+    return " ".join(parts)
+
+
 async def _call(messages: List[Dict[str, Any]], frame_count: int, label: str) -> str:
     started = time.monotonic()
     kwargs: Dict[str, Any] = {
@@ -260,6 +276,7 @@ async def _call(messages: List[Dict[str, Any]], frame_count: int, label: str) ->
         getattr(usage, "completion_tokens", "?"),
         time.monotonic() - started,
     )
+    logger.info("LLM %s timings: %s", label, format_timings(getattr(response, "timings", None)))
     return response.choices[0].message.content or ""
 
 
