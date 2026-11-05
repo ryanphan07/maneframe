@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.2.0 (unreleased; not tagged)
+## Unreleased
+
+Changes after the v0.2.0 tag. Test counts: 329 backend, 19 frontend (2026-11-05).
+
+- Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole, `KOKORO_GAIN_DB`; `scripts/voice_samples.py` for auditioning; model and voice files go in the git-ignored `models/kokoro/`; setup in the README).
+- Uploads are also converted when the video is H.264 but its long side is above `TRANSCODE_MAX_SIDE` or it is HDR (HLG/PQ), through the same conversion path. Frame rate alone is no trigger. Tested on tiny generated clips only.
+- `start.ps1` takes the llama-server host and port from `LLM_BASE_URL`, passes both to llama-server, and stops at once when the port is held by something that is not llama-server (no llama-server `/health` JSON, or `/v1/models` lists no model). Tested against dummy listeners, not a live Docker Desktop.
+- Eval tooling (no effect on the app): `--rotate-terms`/`--seed` in `eval_commentary.py`, `blind_review.py terms`/`humor` options; term counting counts each span of text once, longest match wins ("Twitch chat" is one reference mention).
+
+## v0.2.0 (tagged 2026-11-04)
 
 Changes since v0.1.0.
 
@@ -13,7 +22,7 @@ Changes since v0.1.0.
 - `start.ps1` warms the model with one tiny request.
 - Commentary styles (`hype`, `deadpan`, `broadcast`) chosen in a dropdown, served by `GET /api/styles`.
 - Scene continuity: each window gets the last quips and what the model saw before, plus a lion dance glossary in the system prompt.
-- Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole; `scripts/voice_samples.py` for auditioning; setup in the README). Piper: `TTS_ENGINE=piper` (Piper, CPU, wav) with `PIPER_MODEL_PATH` and `PIPER_LENGTH_SCALE`; edge-tts stays the default. Setup in the README.
+- Optional offline speech: `TTS_ENGINE=piper` (Piper, CPU, wav) with `PIPER_MODEL_PATH` and `PIPER_LENGTH_SCALE`; edge-tts stays the default. Setup in the README.
 - Eval script (`backend/scripts/eval_commentary.py`): LLM-only runs to CSV with a rating summary.
 - Moment labels: add, list, delete and export (CSV) labels on the player timeline, stored by video content hash.
 - Phone-clip transcode: HEVC, undecodable and rotated uploads are converted to upright H.264 as the job's first step, with progress; the prepared video is served with Range support.

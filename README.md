@@ -2,7 +2,7 @@
 
 Upload a lion dance performance clip and get humorous, time-synced play-by-play commentary, read aloud while the video plays. A local vision LLM watches the footage, edge-tts (or, offline, Piper or Kokoro) speaks the lines, and the server schedules them so they never overlap.
 
-Status: v0.1.0 is tagged; changes since are in [`CHANGELOG.md`](CHANGELOG.md) (v0.2.0, not yet tagged). a working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
+Status: v0.2.0 is tagged (git tags v0.1.0 and v0.2.0); changes after it are under Unreleased in [`CHANGELOG.md`](CHANGELOG.md). A working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
 
 ![demo](docs/demo.gif)
 
@@ -29,7 +29,7 @@ Key design points:
 - Server-side scheduling: an audio line never starts before the previous one ends plus 0.3 s. It is shifted up to 2 s later, otherwise dropped. Lines without audio are still shown.
 - Styles and continuity: `hype`, `deadpan` or `broadcast` commentary from a dropdown; each window gets the previous quips and a lion dance glossary. Output is schema-constrained (`LLM_JSON_SCHEMA`).
 - Progressive results: audio is synthesized per window, so the finished part of the commentary plays while the rest is still being analyzed.
-- Phone clips: HEVC, unreadable and rotated uploads are converted to upright H.264 first (at most 1080p and 30 fps, HDR tone-mapped to SDR; a 40 s 4K 120 fps HDR clip converts in about a minute).
+- Phone clips: HEVC, unreadable, rotated, HDR (HLG/PQ) and oversized (long side above `TRANSCODE_MAX_SIDE`, including H.264) uploads are converted to upright SDR H.264 first (at most 1080p and 30 fps, HDR tone-mapped to SDR; a 40 s 4K 120 fps HDR clip converts in about a minute). The H.264 size and HDR triggers were tested on tiny generated clips only, not a real 4K H.264 clip.
 - mp4 export, moment labels (CSV) and an eval script (`backend/scripts/eval_commentary.py`) for judging commentary quality.
 - One command: `start.ps1` starts the model and the app.
 - Honest failure: a window the model fails on (after one retry) is skipped and reported ("skipped n of m parts" with the time ranges), never filled with invented text; if every window fails the job errors. A failed TTS clip only removes that line's audio.
@@ -50,7 +50,7 @@ copy backend\.env.example backend\.env   # then set LLAMA_SERVER_PATH, LLM_MODEL
 
 .\start.ps1
 ```
-`start.ps1` checks the venv, ffmpeg and the frontend build (it builds the frontend if `frontend\dist` is missing), starts llama-server only if `/health` does not answer (log in `logs\`), waits for it, starts the backend on port 8000 (which also serves the built frontend) and opens http://localhost:8000. Ctrl+C stops only the processes the script started; a llama-server that was already running is left alone.
+`start.ps1` checks the venv, ffmpeg and the frontend build (it builds the frontend if `frontend\dist` is missing), takes the llama-server host and port from `LLM_BASE_URL` in `backend\.env`, starts llama-server on that port only if nothing answers there (log in `logs\`) and waits for it, starts the backend on port 8000 (which also serves the built frontend) and opens http://localhost:8000. Ctrl+C stops only the processes the script started; a llama-server that was already running is left alone. If something else holds the port (`/health` without llama-server's JSON, or `/v1/models` lists no model, for example Docker Desktop on 8080), the script stops at once and names the port; free it or change `LLM_BASE_URL`. A port that accepts connections but speaks no HTTP gets 30 s before the script stops.
 
 Manual path (run the pieces yourself; `npm run dev` gives hot reload on port 5173):
 
@@ -72,7 +72,7 @@ Open the app, choose a clip (`.mp4`, `.mov`, `.avi`; at most 30 min and 2 GB by 
 edge-tts needs internet. `TTS_ENGINE=piper` speaks with [Piper](https://github.com/OHF-Voice/piper1-gpl), which runs on the CPU with no network (about 0.05 s per line after a 2 s first load, see `docs/BENCHMARKS.md`). The default stays `edge`. Piper writes wav files; the player and the mp4 export take them like the mp3s.
 
 ```powershell
-backendenv\Scripts\Activate.ps1
+backend\venv\Scripts\Activate.ps1
 pip install piper-tts==1.8.0
 python -m piper.download_voices en_US-lessac-medium --data-dir models/piper
 ```
@@ -126,7 +126,7 @@ Then set `TTS_ENGINE=kokoro` (and `KOKORO_VOICE=af_nicole`, the default voice) i
 | `LABELS_DIR` | `data/labels` | Where moment labels are stored, one `<sha256 of the video>.json` per clip; git-ignored and kept after jobs expire |
 | `FFMPEG_PATH`, `EXPORT_TIMEOUT_SECONDS`, `TRANSCODE_TIMEOUT_SECONDS` | bundled, 1800, 3600 | ffmpeg for mp4 export: empty uses the binary from `imageio-ffmpeg` (installed by requirements.txt); set a path to use your own |
 | `EXPORT_DUCK_DB`, `EXPORT_QUIP_LUFS` | -14, -14 | mp4 export: how far the original audio is lowered under a quip, and the loudness each quip is normalized to |
-| `TRANSCODE_MAX_SIDE`, `TRANSCODE_MAX_FPS` | 1920, 30 | A converted phone clip is scaled to at most this long side and frame rate; HDR (HLG/PQ) is tone-mapped to SDR |
+| `TRANSCODE_MAX_SIDE`, `TRANSCODE_MAX_FPS` | 1920, 30 | A clip is converted when it is HEVC or unreadable, rotated, HDR (HLG/PQ), or its long side is above `TRANSCODE_MAX_SIDE`; the copy is scaled to at most that long side and frame rate and HDR is tone-mapped to SDR. Frame rate alone does not trigger a conversion |
 | `MAX_VIDEO_SECONDS`, `MAX_UPLOAD_MB` | 1800, 2048 | Upload limits (guards, not speed promises) |
 | `JOB_TTL_SECONDS`, `JOB_STALE_SECONDS`, `CLEANUP_INTERVAL_SECONDS` | 3600, 1800, 600 | Job expiry; stale-running-job timeout; cleanup interval |
 | `CORS_ORIGINS`, `PUBLIC_BASE_URL`, `LOG_LEVEL` | localhost:5173/3000, http://localhost:8000, INFO | Server |
@@ -138,7 +138,7 @@ To compare prompts or styles: list clip paths in `eval/clips.txt`, run `python s
 ## Tests
 
 ```powershell
-pytest backend/tests -q          # 313 tests: LLM and edge-tts faked, real tiny videos and a real mp3 for the rest; real Piper and Kokoro tests (skipped without them)
+pytest backend/tests -q          # 329 tests (all passed, none skipped, on 2026-11-05): LLM and edge-tts faked, real tiny videos and a real mp3 for the rest; real Piper, Kokoro and ffmpeg tests (skipped without them)
 cd frontend; npm test; npm run lint; npm run build
 ```
 Not covered by automated tests: the real model, the real edge-tts service, browser playback sync (checked by hand, see How it was tested).
@@ -156,7 +156,7 @@ Measured with `backend/scripts/benchmark.py` on Windows 11, Qwen3.5-9B Q4_K_M vi
 The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 2026-11-02 (4 model calls, 0 retries, about 43 s per call). On the same day Qwen3.6-35B-A3B UD-Q3_K_XL took 173 s for the 40 s clip (about 39 s per call). Re-measured on 2026-11-03 on an idle machine: 212 s cold (about 49 s per uncached call), 165 s on a repeat that reused the prompt cache for window 1, and 182 s with speech switched off (`TTS_ENABLED=false`), so speech is not what limits the speed. Both runs used `LLM_JSON_SCHEMA=true` (the default). The earlier run without the fix needed 3 retries in 9 calls (40 s clip: 299 s). hoco2026.MOV (327 s, 6 GB) was rejected by the default 2 GB upload limit in the earlier run and was not re-run.
 
 ## How it was tested
-- 313 backend tests (LLM and edge-tts faked, Piper and Kokoro faked plus one real synthesis test each that is skipped without the package; real tiny videos and a real mp3), 19 frontend tests (Vitest), frontend lint and build.
+- 329 backend tests (LLM and edge-tts faked, Piper and Kokoro faked plus one real synthesis test each that is skipped without the package; real tiny videos and a real mp3), 19 frontend tests (Vitest), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
 - Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, other machines.
@@ -165,6 +165,7 @@ The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 202
 - Progress stops and the page says "Live updates lost": on Windows, selecting text in the backend console window (QuickEdit) pauses the server until you press Enter. Press Enter, or turn QuickEdit off in the console properties.
 - Job fails with "The AI model rejected the request": llama-server returned an HTTP error (the status is in the backend log); check its console, the model and mmproj files, and `-c`.
 - Job fails with "The AI model is not reachable": start llama-server (see Quickstart) and check `LLM_BASE_URL`.
+- `start.ps1` stops with "Port N ... is held by something that is not llama-server": another program (Docker Desktop often takes 8080) answers on the port from `LLM_BASE_URL`. Quit it, or change the port in `LLM_BASE_URL` (the script then starts llama-server there).
 - No audio, "audio unavailable" notice: edge-tts needs internet and `edge-tts>=7.3.1`. Run `python backend/scripts/tts_check.py` (venv active) to synthesize 6 test lines through the app's own TTS code with your current settings; it prints OK/fail with byte sizes, and failures are logged with the exception class, text length, voice, rate and file size. Clips are synthesized one at a time by default (`TTS_CONCURRENCY=1`); "No audio was received" and dropped connections are retried once.
 - Every line shows "(no audio)" and the log says "duration unreadable": uvicorn is not running from `backend/venv`. Activate it (prompt shows `(venv)`) and restart.
 
