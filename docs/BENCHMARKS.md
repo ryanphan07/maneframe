@@ -221,3 +221,19 @@ Timing breakdown, baseline, calls 2+ (typical): 6150 prompt tokens in total = 37
 - `-b` is already 2048 by default; the real change was `-ub 2048`. `--cache-reuse` is disabled by this build for multimodal models ("cache_reuse is not supported by multimodal, it will be disabled" in the llama-server log), so that row is a no-op and its difference is run-to-run noise.
 - Caveat: the three trials ran against one backend process that was not restarted between them, so their backend log lines all landed in `trial_ub2048.backend.log.err` (jobs in order: ub2048, fa, reuse). Flags were confirmed only by the command line (llama-server prints no flash-attention line at its default verbosity).
 - Conclusion: the cost is image prefill at about 65 tokens/s on this Vulkan build, which the flags tried do not change. Cutting it needs fewer or smaller image tokens (`FRAMES_PER_WINDOW`, `FRAME_WIDTH`), which this session did not touch because they affect quality.
+
+## 2026-11-05 (session 47: why prefill is about 65 tokens/s, and a newer Vulkan build)
+
+Hardware and placement (from llama-server startup log, `-lv 5`): AMD Radeon 860M iGPU (integrated, RDNA 3.5, shares system RAM; Vulkan reports 24394 MiB addressable), 15.6 GB system RAM, no NVIDIA GPU (no nvidia-smi). Build b10679 Vulkan (0.3.0-dev, Clang 20.1.8). Offloaded 41/41 layers; model buffer 15539 MiB on Vulkan0 (all MoE experts included, no `--n-cpu-moe` needed), 515 MiB host buffer; KV cache 160 MiB and recurrent state 63 MiB on Vulkan0; mmproj (vision encoder) runs on Vulkan0 ("CLIP using Vulkan0 backend"), 248 MiB compute buffer. Flash attention auto-enabled. Nothing is left on the CPU, so there is no offload setting to fix.
+
+Is 65 tokens/s expected? Yes. The setup is already the best one available for this GPU: full offload, Vulkan is the right backend for AMD, and the iGPU is the limit (8 compute units, DDR5 memory shared with the CPU, Q3_K dequantization plus the vision encoder in the same prefill). A discrete NVIDIA card would be several times faster; this machine has none.
+
+Candidate: official llama-b12131 Vulkan x64 (C:\AI\llama-b12131-bin-win-vulkan-x64, same flags as the baseline), hoco_40s.mp4, 2 runs:
+
+| Build | Run 1 s/call (windows) | Run 2 s/call | Total s run 1 / run 2 | Prefill t/s (calls 2+) |
+|---|---|---|---|---|
+| b10679 (baseline, session 46) | 53.0 | 44.1 | 229 / 192 | about 65 |
+| b12131 | 47.4 (70.1, 40.0, 37.6, 41.7) | 47.2 (40.8, 43.4, 54.1, 50.4) | 206 / 205 | about 70 to 78 (run 2 slowed to 58 to 62) |
+
+- Run 1 improved 11% (mostly the cold first call), run 2 got 7% worse. The 25% bar is missed on both runs, so nothing was adopted. Both jobs completed with no retries.
+- Not tried: the ROCm/HIP release (win-rocm-10.0) is aimed at discrete Radeon cards and this iGPU is unlikely to be a supported target; the task named Vulkan for AMD.
