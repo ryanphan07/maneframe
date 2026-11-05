@@ -26,6 +26,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_DIR = BACKEND_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR))
+sys.path.insert(0, str(BACKEND_DIR / "scripts"))
+
+import term_file  # noqa: E402
 
 CLIPS_FILE = REPO_DIR / "eval" / "clips.txt"
 RESULTS_DIR = REPO_DIR / "eval" / "results"
@@ -197,6 +200,47 @@ def apply_rules_file(path: Path) -> None:
     llm._read_style = patched
 
 
+class Rotation:
+    """Eval-only (--rotate-terms): per-window slang/reference options, seeded, skipping terms used in the last 3 windows."""
+
+    def __init__(self, terms: Dict[str, list], seed: int):
+        import random
+
+        self.terms, self.seed, self.rng = terms, seed, random.Random(seed)
+        self.history: List[List[str]] = []  # quips actually produced, one list per finished window
+        self.current = ""
+        self.log: List[Dict[str, object]] = []
+
+    def next_window(self, clip: str, window: int) -> str:
+        recent = [q for w in self.history[-term_file.RECENT_WINDOWS:] for q in w]
+        picked = term_file.pick_terms(self.rng, self.terms, recent)
+        self.current = term_file.options_text(picked)
+        self.log.append({"clip": clip, "window": window, **picked})
+        return self.current
+
+    def finish_window(self, quips: List[str]) -> None:
+        self.history.append(quips)
+
+
+ROTATION: Optional[Rotation] = None
+
+
+def install_rotation(rotation: Rotation) -> None:
+    """Append the current window's options to the intro text of every user message."""
+    from app.services import llm
+
+    global ROTATION
+    ROTATION = rotation
+    original = llm.build_messages
+
+    def patched(*args, **kwargs):
+        messages = original(*args, **kwargs)
+        messages[1]["content"][0]["text"] += " " + rotation.current
+        return messages
+
+    llm.build_messages = patched
+
+
 async def analyze_with_facts(path: str, start: float, end: float, box: object, context: object, label: str, style: str):
     """Two-step window: a facts call, then the usual commentary call with the facts in its message (one retry)."""
     from app.config import settings
@@ -235,6 +279,8 @@ async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Option
     for i, (start, end) in enumerate(windows):
         label = f"window {i + 1}/{len(windows)}"
         print(f"  {Path(clip).name} [{style}] {label}", flush=True)
+        if ROTATION is not None:
+            print("    " + ROTATION.next_window(Path(clip).name, i + 1)[len(term_file.OPTIONS_PREFIX):], flush=True)
         n_calls = len(STATS_LOG)
         began = time.monotonic()
         try:
@@ -245,6 +291,8 @@ async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Option
         except Exception as exc:
             if commentary.is_unreachable(exc):
                 raise
+            if ROTATION is not None:
+                ROTATION.finish_window([])
             print(f"  {label} failed ({type(exc).__name__}: {exc}); no rows for it", file=sys.stderr)
             continue
         if window_log is not None:
@@ -254,6 +302,8 @@ async def eval_clip(clip: str, style: str, prompt_hash: str, max_windows: Option
                 "prompt_tokens": [c["prompt_tokens"] for c in calls], "calls": len(calls),
             })
         context.update(result)
+        if ROTATION is not None:
+            ROTATION.finish_window([q["text"] for q in result.quips])
         for quip in result.quips:
             rows.append({
                 "clip": Path(clip).name, "window": i + 1, "t": round(quip["timestamp"], 2), "style": style,
@@ -290,6 +340,7 @@ async def run_eval(clips: List[str], styles: List[str], max_windows: Optional[in
     secs = [w["seconds"] for w in window_log]
     stats = {
         "frames_per_window": settings.FRAMES_PER_WINDOW, "frame_width": settings.FRAME_WIDTH, "facts": use_facts,
+        "rotate_terms": {"seed": ROTATION.seed, "picks": ROTATION.log} if ROTATION else None,
         "seconds_per_window": round(sum(secs) / len(secs), 1) if secs else None, "windows": window_log, "calls": STATS_LOG,
     }
     out.with_suffix(".stats.json").write_text(json.dumps(stats, indent=1), encoding="utf-8")
@@ -308,6 +359,8 @@ def main() -> int:
     parser.add_argument("--frames", type=int, help="eval only: FRAMES_PER_WINDOW for this run")
     parser.add_argument("--frame-width", type=int, help="eval only: FRAME_WIDTH for this run")
     parser.add_argument("--facts", action="store_true", help="eval only: two-step windows (a schema-constrained facts call feeds the commentary call)")
+    parser.add_argument("--rotate-terms", type=Path, metavar="FILE", help="eval only: per window, offer 3 random slang terms and 2 references from FILE (see eval_arms/s_terms.txt), skipping those used in the last 3 windows")
+    parser.add_argument("--seed", type=int, help="seed for --rotate-terms (default: random; recorded in stats.json)")
     parser.add_argument("--out-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--summarize", nargs="*", type=Path, metavar="CSV", help="print mean rating per prompt_hash and style")
     args = parser.parse_args()
@@ -333,6 +386,12 @@ def main() -> int:
         settings.FRAME_WIDTH = args.frame_width
     if args.rules_file:
         apply_rules_file(args.rules_file)
+    if args.rotate_terms:
+        import random
+
+        seed = args.seed if args.seed is not None else random.SystemRandom().randrange(1_000_000)
+        print(f"--rotate-terms {args.rotate_terms} seed={seed}")
+        install_rotation(Rotation(term_file.parse_terms(args.rotate_terms.read_text(encoding="utf-8")), seed))
     logging.getLogger("maneframe.llm").addHandler(UsageHandler())
     logging.getLogger("maneframe.llm").setLevel(logging.INFO)
     styles = [s.strip() for s in args.styles.split(",") if s.strip()]

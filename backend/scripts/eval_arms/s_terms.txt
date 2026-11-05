@@ -1,0 +1,59 @@
+# Arm s2 term pool. Plain text; edit freely. `display | alias | alias`: aliases are only used to detect a term in a quip.
+[slang]
+cooked
+aura
+aura farming
+locked in
+NPC
+main character
+side quest
+crash out
+it's giving
+ate
+no cap
+lowkey
+unc
+chat
+buffering
+Fanum tax
+rizz
+sigma
+delulu
+slay
+mid
+goated
+vibe check
+glow up
+understood the assignment
+living rent free
+touch grass
+big W
+caught in 4K
+speedrun
+tutorial boss
+
+[references]
+The Lion King | lion king | simba | mufasa
+Kung Fu Panda | master shifu | dragon warrior
+Mario Kart | blue shell | rainbow road
+Minecraft | creeper
+the NBA | dunk | free throw | buzzer beater
+Squid Game | red light, green light
+KPop Demon Hunters | huntrix
+Labubu
+a Twitch stream | twitch | streamer
+Shang-Chi
+Mulan
+Tekken
+Street Fighter | hadouken
+a WWE entrance | wwe
+Olympic gymnastics judges | gymnastics judges | perfect 10
+a Twitch chat | twitch chat
+an NBA 2K rating | nba 2k | 2k rating
+Just Dance
+Guitar Hero
+Super Smash Bros | smash bros
+a Pokemon battle | pokemon
+Avatar: The Last Airbender | airbender
+Beyblade
+Dance Dance Revolution | ddr
