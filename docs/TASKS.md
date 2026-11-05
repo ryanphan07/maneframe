@@ -16,7 +16,7 @@ The goal is a better product for real users: lion dance teams turning performanc
 
 ## Phase 1: shareable output and commentary quality
 - mp4 export (done, session 21): the video with the commentary audio mixed in and optional burned-in captions; `GET /api/jobs/{id}/export.mp4`. Session 34: quips normalized and the original ducked deeper (verify report). Follow-ups: try it on a real clip (done on hoco_40s and a phone cut), progress for long renders, output size options.
-- Commentary quality (groundwork done, session 22): glossary (DRAFT, needs owner review), `seen` continuity across windows, styles (hype, deadpan, broadcast) and `scripts/eval_commentary.py`. Still to do: fill `examples.txt` with real few-shot examples, run the eval on a live model and compare prompts, models and styles, tune the style texts from the ratings.
+- Commentary quality (groundwork done, session 22): glossary (DRAFT, needs owner review), `seen` continuity across windows, styles (hype, deadpan, broadcast) and `scripts/eval_commentary.py`. Session 36-38: eval set, blind grounding review and four arms (none beat the baseline); the owner's glossary and examples are in the prompt (session 38: grounding unchanged at about 55%, about 25% slower; named-move lines are the new risk). Still to do: a micro-motion ban plus arm r rules, a cheaper facts call, owner humor ratings from `logs/grounding/owner_humor/pool_s38`, a short commentary glossary if more prompt room is needed.
 
 - Labeling tool (done, session 25): moment labels in the player, stored by video hash in `data/labels/`, CSV download. Session 27: `GET /api/labels.csv` exports all labeled videos without a live job; label files keep the filename and duration. Follow-up: use the labels as eval ground truth in `scripts/eval_commentary.py`.
 
@@ -32,8 +32,8 @@ The goal is a better product for real users: lion dance teams turning performanc
 - Large uploads (proposal only, `docs/research/large_uploads.md`): a 5 min iPhone 4K clip is 6 GB; the 2 GB cap rejects it only after the full upload. Choose between an early client-side message, or a streaming upload with a higher cap.
 - H.264 uploads are not transcoded, so a 4K 120 fps H.264 clip keeps its size in analysis and export (untested).
 
-## Phase 3: distribution (undecided)
-Local packaging versus a hosted service.
+## Phase 3: distribution
+Local only, no hosted service (D6). Open: how to package it (installer, portable folder) and voice options beyond edge-tts (D7).
 
 ## Out of scope
 Auth, persistence or a database, a multi-user queue, S3 or presigned uploads, Docker, deployment, an MCP server, an analytics dashboard.

@@ -147,3 +147,66 @@ Examples:
 | b two-step facts | 57% | +18, +7 | 67-100 | not a winner (time and run 2) |
 | c 9B model | 41% | -6, -2 | 48-50 | not a winner |
 No default changed. Combinations were not tried: the rule allows them only if each arm won alone. Best candidates for a later session (not run): arm r's face/gaze ban plus a ban on micro-motion claims (its "unread" lines went from 4 to 21), and arm b with a cheaper facts call (it halved pose errors but cost 2x the time).
+
+
+# Session 38: owner labels, rubric v3, glossary and examples measured
+
+## Judge check against the owner
+The owner labeled 20 lines (every third line) in `logs/grounding/20261104-031755.csv`. That sheet is the 9B run 2 of session 37 (arm c2, `eval/results/s37c2`), not a baseline run as the session prompt said. Its lines were in the arm c blind pool, so they were matched by clip and text to the blind verdicts of session 37 (all 20 found).
+
+Agreement: **8 of 20** (40%). Every disagreement (line; owner's call and reason; the session's blind call):
+
+| line | owner | session |
+|---|---|---|
+| 01 t=0.8 "Blue lion gets the show off to a loud start!" | yes: blue enters first | unclear (inv) |
+| 01 t=12.5 "Blue lion goes low, like it's waiting for a snack." | unclear: blue is going to sleep, purple next | yes |
+| 01 t=22.5 "Grey lion lifts head. It's waking up from its nap!" | yes: purple (not grey) is starting to wake up | unclear (unread) |
+| 01 t=33.8 "Yellow lion stays centered, like a mascot waiting for a dunk." | no: yellow is moving around | yes |
+| 02 t=31.5 "Musicians are locked in. That drum roll is serious business." | yes: technically correct, the beat has been there all along | unclear (unread) |
+| 03 t=7.5 "Yellow lion just woke up. Stretching like it forgot the drum beat." | yes: yellow is behind the other two, not on the beat | unclear (inv) |
+| 03 t=14.2 "Blue lion rears up! Tail dancer lifts head dancer like a basketball dunk." | no: no stunt or lift in the frames | yes |
+| 03 t=25.8 "Blue and Yellow lions lock up! A sudden, sticky handshake." | no: they are in line, one behind the other (depth), no handshake | yes |
+| 03 t=32.2 "Blue lion tries to lift Yellow, but the hug is too sticky!" | no: all in line, no hug or lift | unclear (inv) |
+| 04 t=32.4 "Yellow lion stays low and steady while the others move!" | unclear: the lions are bowing | no (pose) |
+| 05 t=19.2 "Blue lion's ears perk up. Something smells good over there." | yes (true, but the lions running off stage is the thing to note) | unclear (face) |
+| 05 t=29.2 "Two drummers finish up as the stage goes dark. Curtain call!" | yes: drummers are the last seen and are leaving | no (inv) |
+
+Pattern: the session was too strict on color names, ear and face actions the strip shows, figurative readings and drummers leaving (7 of 12), and too lenient on contact claims: lions standing in a line seen from the front overlap in the picture, which is not a hug, lock or lift (3 of 12). Two calls (t=12.5, t=32.4) are close to a coin flip either way. The session that judged is also the one being checked, so this tests the rubric, not independence.
+
+## Rubric v3 (used from session 38 on)
+Judge a line against the strip (frames at t-1.5, t, t+1.5); humor and idiom are ignored.
+- **yes**: every concrete claim matches the frames, or the statement is true even if trivial ("the beat has been there all along").
+- Acceptable under yes: a wrong color name when the lion is unambiguous (pink called purple, grey or white); ear, face, mouth and head actions when the strip shows them; a figurative reading of a visible behavior ("forgot the beat" for a lion behind the beat, "bailed" for a lion leaving).
+- **no**: a claim the frames contradict: wrong lion, wrong pose or direction, a lift, hug, lock, hop, stunt or banner drop that is not there. Lions overlapping in depth are not in contact. Drummers carrying the drum off are not "still playing", and "the main event is coming" after the dance ended is a no.
+- **unclear**: the claim cannot be told from the stills (micro-motions the strip does not show, a head shake, a scroll in the mouth read as a grin).
+- Failure types: inv, pose, face, who, unread (as in session 37) plus **named** = the line names a specific move or routine part (7-star, bows, Modern 1, head spin, a stunt) that the strip does not show.
+- **notable** yes/no, a second label: is this the moment worth saying here? The owner treats entrances, stunts, scroll presentations, formation changes and exits as notable and "true but not exciting" as not. Recorded only; no decision rule uses it yet.
+
+v3 is looser than v2 on face and micro-motion lines and stricter on contact lines, so session 38 rates are not strictly comparable with session 37's. The baseline was judged again under v3 for that reason.
+
+## Prompt with owner glossary and examples (hash 5d0d5557) against the baseline
+Under test: `lion_dance_glossary.txt` (owner's sections Moves, Stunts, Routine with nested steps) and `examples.txt` (4 owner lines) in the system prompt. Everything else at defaults (35B UD-Q3_K_XL, hype, 6 frames at 896 px, LLM_CTX 8192, LLM_MAX_TOKENS 500). Two runs on the 5-clip set (`eval/results/s38n1`, `s38n2`, `--prepared-dir`), then one blind pool of 237 lines: both session 36 baseline runs (`s36a`, `s36b`, the session 37 baseline) plus the two new runs, judged under rubric v3 (`logs/grounding/blind/pool_s38`).
+
+Tokens and time: prompt tokens per call 5350-6349 (mean 5710), against a mean of about 3250 for the baseline prompt, so the glossary and examples add about 2460 tokens. Completion tokens mean 122 and 116 (max 147). Headroom under LLM_CTX 8192 at the largest call: 8192 - 6349 - 500 (LLM_MAX_TOKENS) = 1343 tokens. The first window of a clip, which has no earlier-window context, measured 6170 in a one-window probe. That is under the 7000 line, so the glossary was not trimmed. Free RAM at the start: 1.01 GB (run 1), 2.21 GB (run 2), with llama-server holding about 4 GB. Seconds per window 39.9 and 40.6 (1.8% apart, no rerun). The baseline's own seconds per window were not recorded in session 36; arm r's 31.3-34.4 s is the proxy, so the new prompt is about 25% slower, in line with the extra prompt tokens.
+
+| | lines | yes | no | unclear | grounded (Wilson 95%) | notable | s/window |
+|---|---|---|---|---|---|---|---|
+| baseline A | 60 | 34 | 16 | 10 | 57% (44-68) | 28% | n/a |
+| baseline B | 59 | 31 | 18 | 10 | 53% (40-65) | 29% | n/a |
+| baseline pooled | 119 | 65 | 34 | 20 | 55% (46-63) | 29% (21-37) | proxy 31-34 |
+| new run 1 | 60 | 35 | 13 | 12 | 58% (46-70) | 27% | 39.9 |
+| new run 2 | 58 | 32 | 13 | 13 | 55% (42-67) | 26% | 40.6 |
+| new pooled | 118 | 67 | 26 | 25 | 57% (48-65) | 26% (19-35) | 40.3 |
+
+Failure types (lines that were not yes), baseline pooled vs new pooled: pose 15 vs 15, inv 14 vs 6, face 13 vs 12, unread 7 vs 13, who 5 vs 3, named 0 vs 2.
+
+Mistake claims (a line saying a lion erred or is late; counted by hand): baseline 2 ("late for a meeting", "stuck in neutral"), new 1 ("officially late to the party"). The model did not copy the owner's "oopsie" or "lost" examples; no new line says oopsie or lost. The word list in `blind_review.py` also catches "behind" used for position ("right behind it", "behind the defense"), which is not a mistake.
+
+Result: no change in grounding (+2 points pooled, intervals overlap almost fully, run-to-run noise is about 13 points), so the 10-point drop trigger did not fire and no fix is proposed. Invented events fell (14 to 6) and unreadable micro-motion rose (7 to 13). The new risk is named moves the strip does not show: "Here come the head spins!" (04_action t=32.0) and "bowing low to the drummers" (05_ending t=8.0), 2 lines of 118. Notable lines stayed at about a quarter of all lines, so the examples did not make the lines more eventful. The cost is about 25% more time and a prompt of 5.7K of 8.2K tokens.
+
+Examples (arm shown after un-blinding):
+- 04_action t=7.5, new run 1: "Scrolls revealed! Purple says 'Go Bears'!" yes, notable.
+- 04_action t=32.0, new run 2: "Here come the head spins! Look at that momentum!" no, named.
+- 03_close t=20.8, new run 1: "Blue lion is officially late to the party. Look at that head shake!" unclear, face (the only mistake claim in the new runs).
+
+Owner humor sheet (not waited for): `logs/grounding/owner_humor/pool_s38/` has 15 random baseline lines and 15 new lines, shuffled, with the origin in `key.csv` only. Fill the `rating (1-5)` column of `sheet.csv`, or read `index.html`, which shows each line with its strip.

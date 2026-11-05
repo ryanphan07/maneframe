@@ -50,7 +50,7 @@ The browser plays the file as a blob URL (the original, not the transcoded copy)
 - `components/LabelPanel.jsx` (under the commentary once completed): "Add label at current time" pauses the video and opens a form (label, quality, note); the list seeks on click, has Delete and a "Download CSV" link. Lint and build pass; not browser-tested.
 - Lint and build pass. No frontend tests.
 
-## Tests: 252 backend (`pytest backend/tests -q`) and 13 frontend (`cd frontend; npm test`, Vitest + Testing Library) passing
+## Tests: 288 backend (`pytest backend/tests -q`) and 19 frontend (`cd frontend; npm test`, Vitest + Testing Library) passing
 - `test_jobs.py` JobStore. `test_api.py` upload, job GET, WebSocket, cleanup, videos not served, validators. `test_commentary.py` orchestration with LLM/TTS faked. `test_vision.py` crop, windows, frame sampling on real tiny videos, prompt/message building, parser, finalize, window failure. `test_export.py` ffmpeg argument/ASS builders, export endpoints, real renders incl. 300 quips (skipped without ffmpeg). `test_transcode.py` probe parsing, rotated/HEVC/failed transcodes, upload route. `test_prompts.py` prompt assembly, styles, continuity; `test_eval.py` eval summarize. `test_labels.py` label routes, validation, persistence by video hash, CSV. `test_tts_piper.py` Piper with the voice faked, wav durations, `clip_path`, one real synthesis (skipped without Piper). `test_audio.py` TTS success/failure/timeout/no leftover files, mutagen on a hand-built mp3, `schedule_quips`, `audio_available`, parser edge cases.
 - Not covered: real LLM or real edge-tts in CI (both need external services), real `motion_box` on moving-subject video, frontend.
 
