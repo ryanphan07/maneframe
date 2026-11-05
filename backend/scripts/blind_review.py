@@ -33,7 +33,7 @@ PER_PAGE = 4
 HUMOR_DIR = REPO_DIR / "logs" / "grounding" / "owner_humor"
 FTYPES = ("inv", "pose", "face", "who", "unread", "named")
 NOTABLE = {"nt": "yes", "bo": "no"}  # optional verdict-line token: nt = a moment worth saying, bo = true but not worth saying
-MISTAKE_WORDS = re.compile(r"\b(oops\w*|oopsie|lost|behind|forgot|forgets|mistake|wrong|missed|misses|fumble\w*|stumble\w*)\b", re.I)
+MISTAKE_WORDS = re.compile(r"\b(oops\w*|oopsie|lost|behind|forgot|forgets|mistake|wrong|missed|misses|late|stuck|fumble\w*|stumble\w*)\b", re.I)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
