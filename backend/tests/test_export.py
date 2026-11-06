@@ -453,7 +453,7 @@ async def test_render_rejects_a_range_outside_the_clip_before_ffmpeg(upload_dir,
 
 @pytest.mark.skipif(not export_module.ffmpeg_available(), reason="no ffmpeg binary available")
 @pytest.mark.anyio
-async def test_real_vertical_trimmed_render_has_the_right_size_length_and_cache(upload_dir):
+async def test_real_vertical_trimmed_render_has_the_right_size_length_and_cache(upload_dir, monkeypatch):
     ffmpeg = export_module.resolve_ffmpeg()
     job_id = "c" * 32
     video = upload_dir / "videos" / f"{job_id}_wide.mp4"
@@ -471,6 +471,8 @@ async def test_real_vertical_trimmed_render_has_the_right_size_length_and_cache(
         {"timestamp": 5.0, "text": "Inside the trim", "audio_url": "http://h/uploads/audio/x/audio_5.00_ab.mp3", "duration_sec": 1.5},
         {"timestamp": 1.0, "text": "Before the trim", "audio_url": None, "duration_sec": None},
     ]
+    # a narrow, steady subject: the crop window follows it; the fit framing has its own test
+    monkeypatch.setattr(export_module.video_processor_service, "motion_track", lambda *a, **k: [(0.4, 0.2, 0.6, 0.8)] * 4)
     out = await export_module.render_export(job_id, str(video), quips, True, aspect="9:16", start=4.0, end=10.0)
     assert out == export_module.export_file(job_id, True, "9:16", 4.0, 10.0)
     cap = cv2.VideoCapture(out)
@@ -481,3 +483,65 @@ async def test_real_vertical_trimmed_render_has_the_right_size_length_and_cache(
     assert "Duration: 00:00:06.0" in probe and "Audio: aac" in probe
     assert await export_module.render_export(job_id, str(video), quips, True, aspect="9:16", start=4.0, end=10.0) == out  # cached
     assert await export_module.render_export(job_id, str(video), quips, True, aspect="9:16") != out
+
+
+# ---- automatic framing (s51) ---------------------------------------------------------------------
+
+
+def test_vertical_fit_canvas_is_9x16_without_upscaling():
+    assert export_module.vertical_fit(1920, 1080)[4:] == (1080, 1920)
+    assert export_module.vertical_fit(640, 360)[4:] == (640, 1138)
+
+
+def test_fit_graph_blurs_a_copy_behind_the_whole_frame_and_burns_captions_on_top():
+    graph = build_filter_graph(15.0, True, [spoken(1.0, 2.0)], "captions.ass", vertical=export_module.vertical_fit(1920, 1080), fit=True)
+    lines = graph.split(";\n")
+    assert lines[0] == "[0:v]split=2[bg][fg]"
+    assert "boxblur" in lines[1] and "scale=1080:1920" in lines[1]
+    assert lines[2].startswith("[fg]scale=1080:-2") and lines[2].endswith("overlay=(W-w)/2:(H-h)/2,subtitles=captions.ass[vout]")
+    assert "crop=1920" not in graph
+
+
+def test_pan_graph_uses_a_time_expression_for_crop_x():
+    window = (0, 0, 608, 1080, 608, 1080)
+    graph = build_filter_graph(10.0, False, [], None, vertical=window, pan_x="if(lt(t,2),0,100)")
+    assert graph == "[0:v]crop=608:1080:x='if(lt(t,2),0,100)':y=0,scale=608:1080:flags=lanczos[vout]"
+
+
+def test_captions_move_to_the_top_when_the_zone_chooser_says_so():
+    def zone(start, end):
+        return "top" if start >= 5 else "bottom"
+
+    ass = build_ass([spoken(1.0, 2.0), spoken(6.0, 2.0)], 1080, 1920, vertical=True, zone_for=zone)
+    dialogue = [line for line in ass.splitlines() if line.startswith("Dialogue")]
+    assert dialogue[0].split(",")[5:9] == ["0", "0", "0", ""] and "{\an8}" not in dialogue[0]
+    assert dialogue[1].split(",")[7] == "192" and "{\an8}" in dialogue[1]
+    assert "{\an8}" not in build_ass([spoken(6.0, 2.0)], 1080, 1920, vertical=True)  # no chooser: unchanged
+
+
+def test_y_mapper_puts_a_fit_video_in_the_middle_of_the_canvas():
+    window = export_module.vertical_fit(1920, 1080)
+    to_out = export_module.vertical_y_mapper("fit", 1920, 1080, window)
+    assert to_out(0.0) == pytest.approx((1920 - 608) / 2 / 1920) and to_out(1.0) == pytest.approx(1 - (1920 - 608) / 2 / 1920)
+    crop = export_module.vertical_crop(1920, 1080, None)
+    assert export_module.vertical_y_mapper("crop", 1920, 1080, crop)(0.3) == pytest.approx(0.3)
+
+
+@pytest.mark.skipif(not export_module.ffmpeg_available(), reason="no ffmpeg binary available")
+@pytest.mark.anyio
+async def test_real_fit_and_panning_renders_work_with_captions(upload_dir, monkeypatch):
+    ffmpeg = export_module.resolve_ffmpeg()
+    job_id = "d" * 32
+    video = upload_dir / "videos" / f"{job_id}.mp4"
+    video.parent.mkdir()
+    subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=10:duration=6",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video)], check=True)
+    quips = [{"timestamp": 1.0, "text": "A caption", "audio_url": None, "duration_sec": None}]
+    sizes = {}
+    for name, boxes in {"fit": [(0.05, 0.4, 0.95, 0.9)] * 4, "crop": [(0.1, 0.1, 0.25, 0.3), (0.7, 0.1, 0.85, 0.3)] * 2}.items():
+        monkeypatch.setattr(export_module.video_processor_service, "motion_track", lambda *a, _b=boxes, **k: _b)
+        out = await export_module.render_export(job_id + name, str(video), quips, True, aspect="9:16")
+        cap = cv2.VideoCapture(out)
+        sizes[name] = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        cap.release()
+    assert sizes == {"fit": (640, 1138), "crop": (202, 360)}

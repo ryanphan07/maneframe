@@ -102,6 +102,22 @@ def _probe_frames(cap, duration: float, probe: int):
         yield frame
 
 
+def _span(profile, keep=0.2, smooth=7, gap=10):
+    """Largest high-energy run in a 1-D motion profile (ignores isolated flicker far from the action). A huge `gap`
+    returns the whole extent of the energy above `keep` instead, so separate groups count together."""
+    profile = np.convolve(profile.astype(np.float32), np.ones(smooth) / smooth, mode="same")
+    idx = np.nonzero(profile >= keep * profile.max())[0]
+    runs, start, prev = [], idx[0], idx[0]
+    for i in idx[1:]:
+        if i - prev > gap:
+            runs.append((start, prev))
+            start = i
+        prev = i
+    runs.append((start, prev))
+    best = max(runs, key=lambda r: profile[r[0]:r[1] + 1].sum())
+    return best[0], best[1] + 1
+
+
 def motion_box(cap, duration, probe=30, probe_w=320, thresh=30, min_hits=3, min_brightness=50) -> Optional[Box]:
     """Return (x0, y0, x1, y1) as fractions of the frame covering where the bright, moving subjects are.
 
@@ -127,22 +143,8 @@ def motion_box(cap, duration, probe=30, probe_w=320, thresh=30, min_hits=3, min_
         return None
     gh, gw = mask.shape
 
-    def span(profile, keep=0.2, smooth=7, gap=10):
-        """Largest high-energy run in a 1-D motion profile (ignores isolated flicker far from the action)."""
-        profile = np.convolve(profile.astype(np.float32), np.ones(smooth) / smooth, mode="same")
-        idx = np.nonzero(profile >= keep * profile.max())[0]
-        runs, start, prev = [], idx[0], idx[0]
-        for i in idx[1:]:
-            if i - prev > gap:
-                runs.append((start, prev))
-                start = i
-            prev = i
-        runs.append((start, prev))
-        best = max(runs, key=lambda r: profile[r[0]:r[1] + 1].sum())
-        return best[0], best[1] + 1
-
-    cx0, cx1 = span(mask.sum(axis=0))
-    cy0, cy1 = span(mask.sum(axis=1))
+    cx0, cx1 = _span(mask.sum(axis=0))
+    cy0, cy1 = _span(mask.sum(axis=1))
     x0, x1, y0, y1 = cx0 / gw, cx1 / gw, cy0 / gh, cy1 / gh
     # pad around the box, enforce a minimum size, clamp to the frame
     bw, bh = x1 - x0, y1 - y0
@@ -158,6 +160,76 @@ def motion_box(cap, duration, probe=30, probe_w=320, thresh=30, min_hits=3, min_
     if (x1 - x0) * (y1 - y0) > 0.8:  # motion everywhere: cropping would not help
         return None
     return float(x0), float(y0), float(x1), float(y1)
+
+
+TRACK_FPS = 4  # frames per second looked at while tracking
+TRACK_W = 240  # tracking works on frames this wide
+
+
+def motion_track(
+    video_path: str, duration: float, start: float = 0.0, end: Optional[float] = None, seg_sec: float = 1.5,
+    thresh=30, min_hits=2, min_brightness=50,
+) -> List[Optional[Box]]:
+    """One motion box per `seg_sec` segment (None where a segment shows too little motion), as fractions of the frame
+    like motion_box, but covering the whole spread of the moving subjects (two lions at opposite sides give a wide box,
+    not just the larger one) and with no padding. The background is the median of an even probe of the video; each
+    segment is then compared with it, streaming the frames, so memory does not grow with the length of the clip.
+    Only [start, end) is tracked (default: all of it); segment i covers [start + i * seg_sec, start + (i + 1) * seg_sec)."""
+    end = duration if end is None else min(end, duration)
+    cap = cv2.VideoCapture(video_path)
+    try:
+        if not cap.isOpened():
+            raise ValueError("Error opening video file")
+
+        def small_gray(frame):
+            h, w = frame.shape[:2]
+            small = cv2.resize(frame, (TRACK_W, max(1, int(h * TRACK_W / w))), interpolation=cv2.INTER_AREA)
+            return cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0).astype(np.float32)
+
+        probe = [small_gray(f) for f in _probe_frames(cap, duration, 30)]
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        count = max(1, math.ceil((end - start) / seg_sec - 1e-9))
+        if len(probe) < 4 or not fps or fps <= 0 or total <= 0:
+            return [None] * count
+        background = np.median(np.stack(probe), axis=0)
+        lit = np.stack(probe).max(axis=0) > min_brightness
+        step = max(1, int(round(fps / TRACK_FPS)))
+        cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000)
+        first = index = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        hits = np.zeros(background.shape, np.int32)
+        boxes: List[Optional[Box]] = []
+        seg = 0
+
+        def close_segment():
+            mask = (hits >= min_hits).astype(np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+            if mask.sum() < 15:
+                return None
+            gh, gw = mask.shape
+            x0, x1 = _span(mask.sum(axis=0), keep=0.1, gap=10**6)
+            y0, y1 = _span(mask.sum(axis=1), keep=0.1, gap=10**6)
+            return float(x0 / gw), float(y0 / gh), float(x1 / gw), float(y1 / gh)
+
+        while True:
+            t = index / fps - start
+            if t >= end - start or not cap.grab():
+                break
+            if (index - first) % step == 0:
+                while seg < count - 1 and t >= (seg + 1) * seg_sec:
+                    boxes.append(close_segment())
+                    hits[:] = 0
+                    seg += 1
+                ok, frame = cap.retrieve()
+                if ok and frame is not None:
+                    gray = small_gray(frame)
+                    hits += ((np.abs(gray - background) > thresh) & lit).astype(np.int32)
+            index += 1
+        boxes.append(close_segment())
+        boxes += [None] * (count - len(boxes))
+        return boxes
+    finally:
+        cap.release()
 
 
 def compute_crop_box(video_path: str, duration: float) -> Optional[Box]:

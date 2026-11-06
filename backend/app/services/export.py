@@ -8,11 +8,12 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 
 from app.config import settings
+from app.services import framing as framing_service
 from app.services import tts as tts_service
 from app.services import video_processor as video_processor_service
 
@@ -99,9 +100,13 @@ def caption_spans(quips: List[ExportQuip]) -> List[Tuple[float, float, str]]:
     return spans
 
 
-def build_ass(quips: List[ExportQuip], width: int, height: int, vertical: bool = False) -> str:
+def build_ass(
+    quips: List[ExportQuip], width: int, height: int, vertical: bool = False,
+    zone_for: Optional[Callable[[float, float], str]] = None,
+) -> str:
     """An ASS subtitle file sized to the video: bottom center, white text on a translucent box. `vertical` (9:16) sizes
-    the text from the width and lifts it into the lower third, above the area Instagram and TikTok cover with their UI."""
+    the text from the width and lifts it into the lower third, above the area Instagram and TikTok cover with their UI.
+    `zone_for(start, end)` may return "top" for a caption whose lower third would cover the performers (vertical only)."""
     if vertical:
         font_size = max(12, round(width * 0.062))
         margin_v = round(height * 0.2)
@@ -129,7 +134,10 @@ def build_ass(quips: List[ExportQuip], width: int, height: int, vertical: bool =
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for start, end, text in caption_spans(quips):
-        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{text}")
+        margin, tag = 0, ""
+        if vertical and zone_for and zone_for(start, end) == "top":
+            margin, tag = round(height * framing_service.CAPTION_TOP_MARGIN), "{\an8}"
+        lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,{margin},,{tag}{text}")
     return "\n".join(lines) + "\n"
 
 
@@ -176,6 +184,54 @@ def vertical_crop(width: int, height: int, box: Optional[Tuple[float, float, flo
     return x, y, crop_w, crop_h, out_w, out_h
 
 
+def vertical_fit(width: int, height: int) -> VerticalCrop:
+    """The 9:16 canvas for the fit framing: the whole frame scaled to the canvas width, a blurred copy above and below.
+    Same tuple shape as vertical_crop; the first four fields describe the full frame, out_w/out_h the canvas (at most
+    1080 wide, never wider than the source, so nothing is upscaled)."""
+    out_w = min(1080, width - width % 2)
+    return 0, 0, width, height, out_w, _even(out_w / VERTICAL_RATIO)
+
+
+def fit_video_height(width: int, height: int, out_w: int) -> int:
+    return _even(height * out_w / width)
+
+
+def vertical_y_mapper(mode: str, width: int, height: int, window: VerticalCrop) -> Callable[[float], float]:
+    """Maps a y fraction of the source frame to a fraction of the 9:16 output height, for caption placement."""
+    _, y, _, crop_h, out_w, out_h = window
+    if mode == "fit":
+        video_h = fit_video_height(width, height, out_w)
+        return lambda v: ((out_h - video_h) / 2 + v * video_h) / out_h
+    return lambda v: min(1.0, max(0.0, (v * height - y) / crop_h))
+
+
+def plan_vertical(
+    video_path: str, width: int, height: int, duration: float, start: float, length: float, framing: str = "auto",
+) -> Tuple[VerticalCrop, Optional[str], bool, Optional[Callable[[float, float], str]]]:
+    """Everything the 9:16 render needs: (window, pan expression for crop x or None, fit mode, caption zone function or
+    None). The motion boxes of the rendered range (about 1.5 s segments) are tracked once. A source already as narrow as
+    9:16 has nothing to pan or fit and keeps one window; "static" is the old single box for the whole video (dev only)."""
+    base = vertical_crop(width, height, None)
+    if framing == "static" or base[2] >= width - 1:
+        box = video_processor_service.compute_crop_box(video_path, duration)
+        return vertical_crop(width, height, box), None, False, None
+    seg = framing_service.SEG_SEC
+    boxes = video_processor_service.motion_track(video_path, duration, start, start + length, seg)
+    window_frac = base[2] / width
+    mode = framing_service.choose_mode(boxes, window_frac) if framing == "auto" else framing
+    logger.info("9:16 framing: %s (%d segments, %d with motion)", mode, len(boxes), sum(1 for b in boxes if b))
+    if mode == "fit":
+        window = vertical_fit(width, height)
+        pan = None
+    else:
+        window = base
+        centers = framing_service.smooth_centers(framing_service.segment_centers(boxes), seg, window_frac)
+        keys = framing_service.pan_keyframes(centers, seg, length, width, base[2])
+        pan = framing_service.pan_expression(keys)
+    zones = framing_service.zone_chooser(boxes, seg, vertical_y_mapper(mode, width, height, window))
+    return window, pan, mode == "fit", zones
+
+
 def normalize_range(start: Optional[float], end: Optional[float], duration: float) -> Tuple[Optional[float], Optional[float]]:
     """Validate a trim range against the clip. Returns (start, end) with None where the range reaches the clip's own
     start or end, so an untrimmed export keeps its cache entry and ffmpeg arguments. Raises ExportError (400)."""
@@ -220,6 +276,8 @@ def build_filter_graph(
     duck_db: Optional[float] = None,
     quip_lufs: Optional[float] = None,
     vertical: Optional[VerticalCrop] = None,
+    pan_x: Optional[str] = None,
+    fit: bool = False,
 ) -> str:
     """The -filter_complex graph. Each quip is loudness-normalized to `quip_lufs` (loudnorm) so both TTS engines land at
     the same level, and the original is lowered by `duck_db` while a quip plays; both default to the settings. `captions_file` is relative: ffmpeg runs with the job's export folder as its working
@@ -227,15 +285,30 @@ def build_filter_graph(
     duck_db = settings.EXPORT_DUCK_DB if duck_db is None else duck_db
     quip_lufs = settings.EXPORT_QUIP_LUFS if quip_lufs is None else quip_lufs
     spoken = [q for q in sorted(quips, key=lambda q: q.timestamp) if q.audio_path and q.duration_sec]
+    video_filters: Optional[List[str]]
     if vertical:  # `duration` is the output length; vertical is vertical_crop's window and 9:16 size (even)
         x, y, crop_w, crop_h, out_w, out_h = vertical
-        video_filters = [f"crop={crop_w}:{crop_h}:{x}:{y}", f"scale={out_w}:{out_h}:flags=lanczos"]
+        if fit:  # the whole frame over a blurred, darkened copy of itself that fills the 9:16 canvas (blurred small, then enlarged: cheap)
+            sw, sh = _even(out_w / 4), _even(out_h / 4)
+            video_filters = None
+            front = f"[fg]scale={out_w}:-2:flags=lanczos[fgs]"
+            back = (
+                f"[bg]scale={sw}:{sh}:force_original_aspect_ratio=increase,crop={sw}:{sh},boxblur=6:2,"
+                f"scale={out_w}:{out_h}:flags=bicubic,eq=brightness=-0.12[bgs]"
+            )
+        else:
+            pos = f"x='{pan_x}':y={y}" if pan_x is not None else f"{x}:{y}"
+            video_filters = [f"crop={crop_w}:{crop_h}:{pos}", f"scale={out_w}:{out_h}:flags=lanczos"]
     else:
         # even dimensions are required by yuv420p H.264; this changes nothing for even-sized video
         video_filters = ["scale=trunc(iw/2)*2:trunc(ih/2)*2"]
-    if captions_file:
-        video_filters.append(f"subtitles={captions_file}")
-    graph = [f"[0:v]{','.join(video_filters)}[vout]"]
+    if video_filters is None:
+        tail = f";[bgs][fgs]overlay=(W-w)/2:(H-h)/2" + (f",subtitles={captions_file}" if captions_file else "") + "[vout]"
+        graph = ["[0:v]split=2[bg][fg]", back, front + tail]
+    else:
+        if captions_file:
+            video_filters.append(f"subtitles={captions_file}")
+        graph = [f"[0:v]{','.join(video_filters)}[vout]"]
 
     if spoken:
         if has_audio:
@@ -400,10 +473,11 @@ def check_options(aspect: str, start: Optional[float], end: Optional[float]) -> 
 
 async def render_export(
     job_id: str, video_path: str, quips: List[Dict[str, Any]], captions: bool,
-    aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None,
+    aspect: str = "original", start: Optional[float] = None, end: Optional[float] = None, framing: str = "auto",
 ) -> str:
     """Return the path of the rendered mp4, rendering it first if it is not cached. `aspect` is "original" or "9:16"
-    (a motion-centered vertical crop); `start`/`end` trim to that range in seconds. Raises ExportError."""
+    (framed automatically, see plan_vertical); `start`/`end` trim to that range in seconds. `framing` is for dev scripts
+    only ("auto", "static", "crop", "fit"; the API always uses "auto") and is not part of the cache name. Raises ExportError."""
     check_options(aspect, start, end)
     untouched = aspect == "original" and start is None and end is None
     final = export_file(job_id, captions)
@@ -426,19 +500,20 @@ async def render_export(
         length = (end if end is not None else duration) - (start or 0.0)
         try:
             has_audio = await _has_audio_stream(ffmpeg, video_path, folder)
-            vertical = None
+            vertical, pan_x, fit, zone_for = None, None, False, None
             out_w, out_h = width, height
             if aspect == "9:16":
-                box = await asyncio.to_thread(video_processor_service.compute_crop_box, video_path, duration)
-                vertical = vertical_crop(width, height, box)
+                vertical, pan_x, fit, zone_for = await asyncio.to_thread(
+                    plan_vertical, video_path, width, height, duration, start or 0.0, length, framing,
+                )
                 out_w, out_h = vertical[4], vertical[5]
             captions_file = None
             if captions:
                 captions_file = CAPTIONS_FILE
                 with open(os.path.join(folder, captions_file), "w", encoding="utf-8") as f:
-                    f.write(build_ass(items, out_w, out_h, vertical=vertical is not None))
+                    f.write(build_ass(items, out_w, out_h, vertical=vertical is not None, zone_for=zone_for))
             with open(os.path.join(folder, GRAPH_FILE), "w", encoding="utf-8") as f:
-                f.write(build_filter_graph(length, has_audio, items, captions_file, vertical=vertical))
+                f.write(build_filter_graph(length, has_audio, items, captions_file, vertical=vertical, pan_x=pan_x, fit=fit))
             args = build_ffmpeg_args(
                 ffmpeg, video_path, partial, length, has_audio, _relative_audio(items, folder), start=start,
             )
