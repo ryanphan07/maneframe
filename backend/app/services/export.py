@@ -136,7 +136,7 @@ def build_ass(
     for start, end, text in caption_spans(quips):
         margin, tag = 0, ""
         if vertical and zone_for and zone_for(start, end) == "top":
-            margin, tag = round(height * framing_service.CAPTION_TOP_MARGIN), "{\an8}"
+            margin, tag = round(height * framing_service.CAPTION_TOP_MARGIN), r"{\an8}"
         lines.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,{margin},,{tag}{text}")
     return "\n".join(lines) + "\n"
 

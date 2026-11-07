@@ -514,9 +514,9 @@ def test_captions_move_to_the_top_when_the_zone_chooser_says_so():
 
     ass = build_ass([spoken(1.0, 2.0), spoken(6.0, 2.0)], 1080, 1920, vertical=True, zone_for=zone)
     dialogue = [line for line in ass.splitlines() if line.startswith("Dialogue")]
-    assert dialogue[0].split(",")[5:9] == ["0", "0", "0", ""] and "{\an8}" not in dialogue[0]
-    assert dialogue[1].split(",")[7] == "192" and "{\an8}" in dialogue[1]
-    assert "{\an8}" not in build_ass([spoken(6.0, 2.0)], 1080, 1920, vertical=True)  # no chooser: unchanged
+    assert dialogue[0].split(",")[5:9] == ["0", "0", "0", ""] and r"{\an8}" not in dialogue[0]
+    assert dialogue[1].split(",")[7] == "192" and r"{\an8}" in dialogue[1]
+    assert r"{\an8}" not in build_ass([spoken(6.0, 2.0)], 1080, 1920, vertical=True)  # no chooser: unchanged
 
 
 def test_y_mapper_puts_a_fit_video_in_the_middle_of_the_canvas():
@@ -545,3 +545,8 @@ async def test_real_fit_and_panning_renders_work_with_captions(upload_dir, monke
         sizes[name] = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
         cap.release()
     assert sizes == {"fit": (640, 1138), "crop": (202, 360)}
+
+
+def test_top_caption_tag_is_a_backslash_not_a_control_character():
+    ass = build_ass([spoken(6.0, 2.0)], 1080, 1920, vertical=True, zone_for=lambda start, end: "top")
+    assert r"\an8" in ass and "\x07" not in ass

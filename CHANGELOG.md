@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Changes after the v0.2.0 tag. Test counts: 357 backend, 36 frontend (2026-11-06).
+Changes after the v0.2.0 tag. Test counts: 358 backend, 36 frontend (2026-11-06).
 
 - Export size options: `aspect=9:16` frames each clip automatically: a crop window that follows the motion, or, for wide action, the whole frame over a blurred copy; captions avoid the performers (no new params; DECISIONS D9); 1080x1920 (source height if smaller); `start` and `end` trim the clip (quips that start inside the range and finish by `end`, shifted). Optional query params on `POST /api/jobs/{id}/export` and `GET .../export.mp4`, defaults unchanged; 400 for bad values. The web app has a size choice and Start/End fields with Set start / Set end buttons next to "Download video".
 
