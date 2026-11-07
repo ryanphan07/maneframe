@@ -4,7 +4,7 @@ import { CLIP_LONG, collectErrors, jobId, playAndMeasure, quipRows, shot, upload
 
 test.describe.configure({ mode: 'serial' });
 let savedJob = null; // the localStorage entry test a's upload wrote, replayed in d's fresh context
-test.beforeAll(startBackend);
+test.beforeAll(() => startBackend());
 test.afterAll(stopBackend);
 
 // a and d share one real run of the 40 s clip: a reloads it mid-run, d plays the finished job.
