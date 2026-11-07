@@ -72,3 +72,11 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: commit to local main and let the owner push (the workflow through session 49).
 - Why: the planning chat reviewed only the handoff, never the diff, and test results were the session's own report.
 - Tradeoff: one push and a CI wait per session, and session branches are visible in the public repo. Merge commits, not squash, keep the one-logical-change-per-commit history.
+
+## 2026-11-05 (later)
+
+### D9. Automatic framing for the 9:16 export
+- Decision: the 9:16 export frames each clip automatically: a fixed-size crop window that follows the motion over time, or, when the action is wider than that window for much of the clip, the whole frame scaled to the 9:16 width with a blurred copy filling above and below. Captions are placed where they do not cover the performers. There is no user framing control.
+- Alternative considered: one static crop box per video (the first 9:16 version), or a user-chosen framing option in the export controls.
+- Why: the static box cut out performers who spread apart, and teams want a usable post in one click.
+- Tradeoff: the automatic choice can be wrong for a clip and there is no manual override yet; tracking adds export time.
