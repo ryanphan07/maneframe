@@ -76,7 +76,7 @@ export const stopLlama = () => {
 
 let backend = null;
 
-export const startBackend = async () => {
+export const startBackend = async (extraEnv = {}) => {
   if (await get(`http://127.0.0.1:${API_PORT}/api/styles`)) throw new Error(`Something already answers on port ${API_PORT}. Stop it first.`);
   const data = path.join(E2E_DIR, 'data');
   fs.mkdirSync(path.join(data, 'uploads'), { recursive: true });
@@ -84,7 +84,7 @@ export const startBackend = async () => {
   const python = path.join(ROOT, 'backend', 'venv', 'Scripts', 'python.exe');
   backend = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', String(API_PORT)], {
     cwd: path.join(ROOT, 'backend'), stdio: ['ignore', log, log], windowsHide: true,
-    env: { ...process.env, UPLOAD_DIR: path.join(data, 'uploads'), LABELS_DIR: path.join(data, 'labels') },
+    env: { ...process.env, ...extraEnv, UPLOAD_DIR: path.join(data, 'uploads'), LABELS_DIR: path.join(data, 'labels') },
   });
   const deadline = Date.now() + 60 * 1000;
   while (!(await get(`http://127.0.0.1:${API_PORT}/api/styles`))) {

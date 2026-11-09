@@ -9,10 +9,22 @@ const DOWNLOADS = path.join(os.homedir(), 'Downloads');
 export const CLIP_SHORT = process.env.E2E_CLIP_SHORT || path.join(DOWNLOADS, 'shorter_test.mp4');
 export const CLIP_LONG = process.env.E2E_CLIP_LONG || path.join(DOWNLOADS, 'hoco_40s.mp4');
 
+// Cuts a clip out of `src` into logs/e2e/data/media (generated test media never goes in the repo). Cached by name.
+export const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
+export const makeClip = (name, src, seconds, extraArgs = []) => {
+  const dir = path.join(E2E_DIR, 'data', 'media');
+  fs.mkdirSync(dir, { recursive: true });
+  const out = path.join(dir, name);
+  if (!fs.existsSync(out)) {
+    execFileSync(ffmpegBin(), ['-v', 'error', '-y', '-ss', '5', '-t', String(seconds), '-i', src, ...extraArgs, out]);
+  }
+  return out;
+};
+
 export const ffprobeBin = () => process.env.FFPROBE_PATH || 'ffprobe';
 
 export const probe = (file) => JSON.parse(execFileSync(ffprobeBin(), ['-v', 'error', '-show_entries',
-  'stream=codec_type,codec_name:format=duration', '-of', 'json', file], { encoding: 'utf8' }));
+  'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', file], { encoding: 'utf8' }));
 
 export const shot = async (page, name) => {
   fs.mkdirSync(E2E_DIR, { recursive: true });
@@ -56,3 +68,16 @@ export const playAndMeasure = async (page, ms = 8000) => {
 };
 
 export { ROOT };
+
+export const apiJob = async (page, id) => (await (await page.request.get(`/api/jobs/${id}`)).json());
+
+// Clicks Download video and saves the file; returns { file, name }.
+export const downloadExport = async (page, saveAs) => {
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 5 * 60 * 1000 }),
+    page.getByRole('button', { name: 'Download video' }).click(),
+  ]);
+  const file = path.join(E2E_DIR, saveAs);
+  await download.saveAs(file);
+  return { file, name: download.suggestedFilename() };
+};

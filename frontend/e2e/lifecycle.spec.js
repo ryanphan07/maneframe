@@ -5,7 +5,7 @@ import { startBackend, stopBackend, E2E_DIR } from './stack.js';
 import { CLIP_SHORT, collectErrors, playAndMeasure, probe, shot, upload, waitDone } from './helpers.js';
 
 test.describe.configure({ mode: 'serial' });
-test.beforeAll(startBackend);
+test.beforeAll(() => startBackend());
 test.afterAll(stopBackend);
 
 test('b: reload after completion plays, lists commentary and downloads H.264 + AAC', async ({ page }) => {
