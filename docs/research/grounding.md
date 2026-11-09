@@ -338,3 +338,18 @@ Examples (arm shown after un-blinding): quiet filler in four-frame lines such as
 
 ## Cache check (task 1)
 `docs/BENCHMARKS.md` session 46 already records `cache_n=3716` on every call after call 1 (call 1 of a fresh server `cache_n=0`), so the system prompt is served from cache on calls 2+. The eval's stats file does not record `cache_n`, so this session did not re-measure it; nothing to fix.
+
+# Session 54: humor verdict for arms s and s2 (pool_s40 ratings)
+Owner rated `logs/grounding/owner_humor/pool_s40/` (sheet.csv, 60 of 60 rated), unblinded with `key.csv`.
+
+| group | n | mean | median | rated 4-5 | grounded (grounding.md) |
+|---|---|---|---|---|---|
+| anchors (pool_s38) | 10 | 2.10 | 2 | 10% | |
+| arm s | 25 | 1.88 | 2 | 4% | 68% vs drift 53% |
+| arm s2 | 25 | 2.36 | 2 | 20% | 55% vs drift 50% |
+
+Anchor consistency: the same 10 lines averaged 2.10 here and 2.20 in pool_s38 (difference -0.10), so the owner's scale held.
+
+Rules: both need mean >= anchor mean + 0.7 = 2.80. Arm s: 1.88 fails (below the anchors, -0.22). Arm s2: 2.36 fails (+0.26 over anchors; the +0.3 over arm s, 0.48, would pass but is moot). Grounding conditions held for both and were not needed.
+
+Verdict: **neither arm wins; `hype.txt` unchanged, no DECISIONS entry, rotation stays eval-only.** s2 was the better-liked arm (20% of lines rated 4-5 against 4% and 10%), but the gain over the plain prompt is small. The slang direction is not worth a prompt change on this evidence.
