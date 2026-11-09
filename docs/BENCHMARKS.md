@@ -237,3 +237,14 @@ Candidate: official llama-b12131 Vulkan x64 (C:\AI\llama-b12131-bin-win-vulkan-x
 
 - Run 1 improved 11% (mostly the cold first call), run 2 got 7% worse. The 25% bar is missed on both runs, so nothing was adopted. Both jobs completed with no retries.
 - Not tried: the ROCm/HIP release (win-rocm-10.0) is aimed at discrete Radeon cards and this iGPU is unlikely to be a supported target; the task named Vulkan for AMD.
+
+
+## Session 53: four frames per window (eval, not adopted)
+35B UD-Q3_K_XL, hype, 5-clip set (20 windows), `eval_commentary.py --frames 4`, 896 px, llama-server b10679 on :8090 with `-c 8192`. Baseline (6 frames) from session 45, same prompt hash.
+
+| | s/window | prompt tokens mean (max) |
+|---|---|---|
+| 6 frames, run A / B | 42.3 / 40.0 | 5707 (6358) |
+| 4 frames, run 1 / 2 | 34.3 / 30.5 | 5131 (5574) |
+
+Ratio 0.81 and 0.76. The 0.8x bar was missed by run 1, and the notable-line share fell from 21% to 8% (`docs/research/grounding.md`, session 53), so the default stays 6. Prefill remains about 65 tokens/s.
