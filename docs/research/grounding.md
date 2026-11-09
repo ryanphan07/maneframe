@@ -308,3 +308,33 @@ Examples (arm shown after un-blinding):
 - 02_drummers t=14.2, baseline: "That head shake is pure attitude." unclear, unread (the kind r2 removed).
 
 Open for the owner: nothing was changed. The pending humor change on `hype.txt` (pool_s40) is independent of this result; r2's rule text would only be worth adding if a later arm combines it with something that fixes pose and named-move errors (for example arm b's facts call), which this data does not support.
+
+
+# Session 53: four frames per window (`--frames 4`, 896 px)
+
+Question: does `FRAMES_PER_WINDOW=4` replace the default 6? Eval only, no default changed. Baseline reused: `s45b1`, `s45b2` (hype prompt hash 5d0d5557; `styles/hype.txt` and every prompt file unchanged since session 45 by git log, and the arm runs print the same hash). Arm: `eval/results/s53f1`, `s53f2` (35B UD-Q3_K_XL, 5-clip set, `--prepared-dir`, defaults otherwise, llama-server on port 8090, `-c 8192`). Blind pool `pool_s53`: all 117 arm lines plus a 30-line drift sample (15 random lines from each baseline run, seed 53), 147 lines, one judge (this session), rubric v3 with the session 39 addendum, un-blinded afterwards.
+
+Decision rule (fixed before the runs): adopt only if s/window is at most 0.8x baseline on both runs, AND pooled grounded is no more than 5 points below the baseline pooled rate, AND the notable share is no more than 5 points below.
+
+| | lines | yes | no | unclear | grounded (Wilson 95%) | notable | s/window | prompt tokens mean (max) |
+|---|---|---|---|---|---|---|---|---|
+| baseline A (s45b1) | 59 | 30 | 7 | 22 | 51% (38-63) | 22% | 42.3 | 5707 (6318) |
+| baseline B (s45b2) | 59 | 31 | 16 | 12 | 53% (40-65) | 20% | 40.0 | 5708 (6358) |
+| baseline pooled (s45 judging) | 118 | 61 | 23 | 34 | 52% | 21% | 41.2 | |
+| four frames run 1 | 58 | 28 | 12 | 18 | 48% (36-61) | 5% | 34.3 | 5130 (5523) |
+| four frames run 2 | 59 | 29 | 11 | 19 | 49% (37-62) | 10% | 30.5 | 5133 (5574) |
+| four frames pooled | 117 | 57 | 23 | 37 | 49% (40-58) | 8% (4-14) | 32.4 | 5131 |
+| drift sample (baseline) | 30 | 16 | 3 | 11 | 53% (36-70) | 23% (12-41) | | |
+
+Failure types (lines not yes), four frames pooled: unread 25, pose 17, face 7, inv 6, named 4, who 1. Drift sample: unread 4, pose 6, inv 3, face 1 (s45 baseline pooled: unread 20, inv 22, pose 9, face 4). Mistake-claim words: 1 in the arm runs, 0 in the drift sample.
+
+## Verdict: not adopted (`FRAMES_PER_WINDOW` stays 6, no DECISIONS entry)
+- Speed: 34.3 / 42.3 = 0.81x on run 1 (misses 0.8 by 0.01) and 30.5 / 40.0 = 0.76x on run 2. The rule needs both, so it fails on run 1 alone. The saving is real (about 21%: the prompt falls from 5707 to 5131 tokens, 576 fewer image tokens per call at about 65 tokens/s is 9 s), but run-to-run noise on this machine is about 10 s per window, the size of the saving.
+- Grounded: 49% against 52% (-3 points; 53% for the drift sample, -4), inside the 5-point allowance. The rubric calibration held: the drift sample judged 53% now against 52% pooled in session 45.
+- Notable share: 8% against 21% (23% for the drift sample), 13 to 15 points below, past the 5-point allowance. Fewer frames meant fewer visible changes between frames, so the lines were true-but-quiet ("holding position", "just chilling") rather than entrances, rears and exits. That is the tradeoff the planned DECISIONS text names, and it is large. The judging for this share was a single judge's "is this the moment worth saying" call, but the drift sample was judged in the same pass, so the gap (8% vs 23%) is comparable.
+- Not run: the benchmark of end-to-end time on `hoco_40s.mp4` (only needed if adopted).
+
+Examples (arm shown after un-blinding): quiet filler in four-frame lines such as "Yellow lion just vibing. Master of calm." (02_drummers t=28.7, yes, not notable); invented or wrong event, "Blue lion goes airborne! The crowd screams!" (03_close t=31.9, no, inv).
+
+## Cache check (task 1)
+`docs/BENCHMARKS.md` session 46 already records `cache_n=3716` on every call after call 1 (call 1 of a fresh server `cache_n=0`), so the system prompt is served from cache on calls 2+. The eval's stats file does not record `cache_n`, so this session did not re-measure it; nothing to fix.
