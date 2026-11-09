@@ -47,3 +47,6 @@ frontend/test-results/
 .claude/settings.local.json
 docs/handoffs/
 docs/MANUAL_CHECKS.md
+
+# Portable package output (scripts/package.ps1)
+build/

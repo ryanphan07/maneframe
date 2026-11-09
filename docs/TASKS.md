@@ -38,7 +38,10 @@ The goal is a better product for real users: lion dance teams turning performanc
 - H.264 size and HDR (done, session 43): an H.264 upload whose long side is above `TRANSCODE_MAX_SIDE` or that is HLG/PQ HDR goes through the same conversion; frame rate alone is no trigger. Tested on tiny generated clips (over max side, HLG, 1080p30 untouched); not run on a real 4K H.264 clip.
 
 ## Phase 3: distribution
-Local only, no hosted service (D6). Open: how to package it (installer, portable folder) and voice options beyond edge-tts (D7).
+Local only, no hosted service (D6). Packaging is a portable Windows zip (D10), model chosen at first run (D11), data in %LOCALAPPDATA%\Maneframe (D12).
+- Done (s55): `scripts/package.ps1` builds the zip; `packaging/` holds the launcher and Start Maneframe.bat. Models are placed by hand.
+- Next (s56): first-run model chooser and downloader with checksum.
+- Open: code signing, auto-update, voice options beyond edge-tts (D7).
 
 ## Out of scope
 Auth, persistence or a database, a multi-user queue, S3 or presigned uploads, Docker, deployment, an MCP server, an analytics dashboard.
