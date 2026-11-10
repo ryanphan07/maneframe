@@ -550,3 +550,12 @@ async def test_real_fit_and_panning_renders_work_with_captions(upload_dir, monke
 def test_top_caption_tag_is_a_backslash_not_a_control_character():
     ass = build_ass([spoken(6.0, 2.0)], 1080, 1920, vertical=True, zone_for=lambda start, end: "top")
     assert r"\an8" in ass and "\x07" not in ass
+
+
+def test_ffmpeg_path_is_used_without_touching_imageio(monkeypatch, tmp_path):
+    exe = tmp_path / "ffmpeg.exe"
+    exe.write_bytes(b"x")
+    monkeypatch.setattr(settings, "FFMPEG_PATH", str(exe))
+    import sys
+    monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)  # importing it would raise
+    assert export_module.resolve_ffmpeg() == str(exe)

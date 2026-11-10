@@ -15,8 +15,9 @@ recommended one):
   35 = Qwen3.6-35B-A3B, 16.5 GB (model 15.7 GB + vision 0.8 GB), better commentary, needs about 16 GB of RAM
    9 = Qwen3.5-9B, 6.1 GB (model 5.3 GB + vision 0.9 GB), for PCs with less memory
 A few minutes on a fast connection, much longer on slow Wi-Fi. If the download stops, start Maneframe
-again and it continues. To switch models later, double-click "Change model.bat".
-Voices (edge-tts) need an internet connection whenever you make a clip.
+again and it continues. Right after the model, Maneframe also downloads the video tool (ffmpeg,
+30 MB, once; it is not in the zip because that build is GPL-licensed). To switch models later, double-click "Change model.bat".
+Voices (edge-tts) still need an internet connection whenever you make a clip.
 
 Your files (models, uploaded clips, labels, logs) are kept in:
   %LOCALAPPDATA%\Maneframe        (paste that into the Explorer address bar)

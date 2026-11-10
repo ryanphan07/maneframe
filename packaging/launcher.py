@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+import zipfile
 from ctypes import wintypes
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +27,7 @@ LLAMA = os.path.join(ROOT, "llama", "llama-server.exe")
 BACKEND_DIR = os.path.join(ROOT, "backend")
 
 MANIFEST = os.path.join(ROOT, "models.json")
+FFMPEG_PIN = os.path.join(ROOT, "ffmpeg.json")
 LLM_CTX = "8192"  # measured prompts are about 5.1K to 6.4K tokens; the rest of the 8192 is the answer
 MB = 1024 ** 2
 GB = 1024 ** 3
@@ -240,11 +242,12 @@ def bytes_needed(entry, models_dir):
     return need
 
 
-def disk_problem(entry, models_dir, free):
-    """None when the model fits; else a message saying how much space is needed."""
+def disk_problem(entry, models_dir, free, extra=0):
+    """None when the model fits; else a message saying how much space is needed. `extra` is other first-run bytes (ffmpeg)."""
     need = bytes_needed(entry, models_dir)
     if need == 0:
         return None
+    need += extra
     required = need + DISK_MARGIN
     if free >= required:
         return None
@@ -253,7 +256,7 @@ def disk_problem(entry, models_dir, free):
             "Free up space or choose the other model.")
 
 
-def choose_model(models, ram, gpu_name, gpu_bytes, models_dir, input_fn=input, out=print):
+def choose_model(models, ram, gpu_name, gpu_bytes, models_dir, input_fn=input, out=print, extra=0):
     free = free_disk_bytes(models_dir)
     rec = recommend(ram, gpu_bytes)
     keys = {m["key"]: m for m in models}
@@ -275,7 +278,7 @@ def choose_model(models, ram, gpu_name, gpu_bytes, models_dir, input_fn=input, o
         if key not in keys:
             out(f"Please type {' or '.join(keys)}, or just press Enter.")
             continue
-        problem = disk_problem(keys[key], models_dir, free)
+        problem = disk_problem(keys[key], models_dir, free, extra)
         if problem:
             out(problem)
             continue
@@ -518,7 +521,7 @@ def model_ready(entry, data):
     return all(is_verified(cfg, p, os.path.join(data, "models", p["file"])) for p in model_files(entry))
 
 
-def select_model(data, change=False, input_fn=input, out=print):
+def select_model(data, change=False, input_fn=input, out=print, extra=0):
     """The model and mmproj paths to run with. Asks (chooser) only when there is no valid choice with all files present."""
     models = load_manifest()
     if change:
@@ -528,8 +531,65 @@ def select_model(data, change=False, input_fn=input, out=print):
     if entry is None or not model_ready(entry, data):
         os.makedirs(os.path.join(data, "models"), exist_ok=True)
         gpu_name, gpu_bytes = gpu_info()
-        entry = choose_model(models, total_ram_bytes(), gpu_name, gpu_bytes, os.path.join(data, "models"), input_fn, out)
+        entry = choose_model(models, total_ram_bytes(), gpu_name, gpu_bytes, os.path.join(data, "models"), input_fn, out, extra)
     return ensure_model(entry, data, out)
+
+
+# ---- ffmpeg (not bundled, D18): the pinned imageio-ffmpeg wheel is downloaded from PyPI at first run ----
+
+def load_ffmpeg_pin(path=FFMPEG_PIN):
+    try:
+        with open(path, encoding="utf-8") as f:
+            pin = json.load(f)
+        for k in ("version", "url", "exe"):
+            if not isinstance(pin[k], str) or not pin[k]:
+                raise ValueError(k)
+        if not isinstance(pin["size"], int) or pin["size"] <= 0:
+            raise ValueError("size")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(pin["sha256"])):
+            raise ValueError("sha256")
+        return pin
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise Stop(f"ffmpeg.json is missing or unreadable ({e}). Unzip the whole package again.")
+
+
+def ffmpeg_path(data, pin):
+    return os.path.join(data, "tools", "ffmpeg", pin["exe"].rsplit("/", 1)[-1])
+
+
+def ffmpeg_bytes_needed(data, pin):
+    return 0 if os.path.isfile(ffmpeg_path(data, pin)) else pin["size"]
+
+
+def ensure_ffmpeg(data, pin=None, out=print, downloader=None):
+    """Path of ffmpeg.exe in <data>\tools\ffmpeg, downloading the pinned wheel and extracting only the exe when missing."""
+    pin = pin or load_ffmpeg_pin()
+    downloader = downloader or download_file
+    exe = ffmpeg_path(data, pin)
+    if os.path.isfile(exe):
+        return exe
+    folder = os.path.dirname(exe)
+    os.makedirs(folder, exist_ok=True)
+    free = free_disk_bytes(folder)
+    if free < 2 * pin["size"]:
+        raise Stop(f"Not enough free disk space for the video tool: {2 * pin['size'] / GB:.2f} GB needed in {folder}, "
+                   f"{free / GB:.1f} GB is free.")
+    wheel = os.path.join(folder, pin["url"].rsplit("/", 1)[-1])
+    out(f"Downloading the video tool (ffmpeg, {format_size(pin['size'])}) from PyPI (imageio-ffmpeg {pin['version']})")
+    t0 = time.time()
+    downloader(pin["url"], wheel, pin["size"], pin["sha256"], label="ffmpeg", out=out)
+    out(f"  ffmpeg downloaded and checked in {time.time() - t0:.0f} s")
+    tmp = exe + ".tmp"
+    try:
+        with zipfile.ZipFile(wheel) as z, z.open(pin["exe"]) as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        os.replace(tmp, exe)
+    except (OSError, KeyError, zipfile.BadZipFile) as e:
+        if os.path.isfile(tmp):
+            os.remove(tmp)
+        raise Stop(f"Could not extract ffmpeg from {wheel}: {e}")
+    os.remove(wheel)
+    return exe
 
 
 def stop(proc):
@@ -544,10 +604,12 @@ def main():
     data = data_dir()
     for sub in ("models", "uploads", "labels", "logs"):
         os.makedirs(os.path.join(data, sub), exist_ok=True)
+    pin = load_ffmpeg_pin()
     try:
-        model, mmproj = select_model(data, change="--change-model" in sys.argv[1:])
+        model, mmproj = select_model(data, change="--change-model" in sys.argv[1:], extra=ffmpeg_bytes_needed(data, pin))
+        ffmpeg = ensure_ffmpeg(data, pin)
     except KeyboardInterrupt:
-        raise Stop("Stopped. A partly downloaded model is kept; start Maneframe again to continue it.")
+        raise Stop("Stopped. A partly downloaded file is kept; start Maneframe again to continue it.")
 
     llama_port = free_port(PREFERRED_LLAMA_PORT)
     backend_port = free_port(PREFERRED_BACKEND_PORT, avoid=(llama_port,))
@@ -578,6 +640,7 @@ def main():
                 raise Stop(f"The model did not load in {LLAMA_READY_TIMEOUT // 60} minutes. See {os.path.join(logs, 'llama-server.log')}")
             time.sleep(2)
         print("Language model ready.")
+        print("Warming up the language model (the first start after a download can take a few minutes)...")
         warm = urllib.request.Request(
             f"{llama_base}/chat/completions", method="POST",
             headers={"Content-Type": "application/json", "Authorization": "Bearer local-key"},
@@ -595,6 +658,7 @@ def main():
             "LABELS_DIR": os.path.join(data, "labels"),
             "LLM_BASE_URL": llama_base,
             "PUBLIC_BASE_URL": f"http://localhost:{backend_port}",
+            "FFMPEG_PATH": ffmpeg,
             "PYTHONDONTWRITEBYTECODE": "1",
         })
         api_log = open(os.path.join(logs, "backend.log"), "wb")

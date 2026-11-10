@@ -464,3 +464,126 @@ def test_free_port_gives_up_clearly(monkeypatch):
     monkeypatch.setattr(launcher, "port_in_use", lambda p: True)
     with pytest.raises(launcher.Stop):
         launcher.free_port(9000)
+
+
+# ---- ffmpeg first-run download (D18) ----
+
+FF_EXE = "imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe"
+FF_BYTES = b"MZ fake ffmpeg " * 1000
+
+
+def _wheel_bytes():
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("imageio_ffmpeg/__init__.py", "")
+        z.writestr(FF_EXE, FF_BYTES)
+    return buf.getvalue()
+
+
+def _pin(wheel, sha=None):
+    return {"version": "0.7.0", "url": "https://files.pythonhosted.org/x/imageio_ffmpeg-0.7.0-py3-none-win_amd64.whl",
+            "size": len(wheel), "sha256": sha or hashlib.sha256(wheel).hexdigest(), "exe": FF_EXE}
+
+
+def _serve_wheel(monkeypatch, wheel):
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        return FakeResp(wheel, 0, 200, FakeClock(), 0.0, 100_000)
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", fake_urlopen)
+    return calls
+
+
+def test_shipped_ffmpeg_pin_is_valid_and_matches_requirements():
+    pin = launcher.load_ffmpeg_pin(str(ROOT / "packaging" / "ffmpeg.json"))
+    assert pin["url"].startswith("https://files.pythonhosted.org/") and pin["url"].endswith("win_amd64.whl")
+    assert f"imageio-ffmpeg=={pin['version']}" in (ROOT / "backend" / "requirements.txt").read_text()
+
+
+def test_ffmpeg_wheel_is_downloaded_and_only_the_exe_extracted(tmp_path, monkeypatch):
+    wheel = _wheel_bytes()
+    calls = _serve_wheel(monkeypatch, wheel)
+    exe = launcher.ensure_ffmpeg(str(tmp_path), _pin(wheel), quiet)
+    assert exe == str(tmp_path / "tools" / "ffmpeg" / "ffmpeg-win-x86_64-v7.1.exe")
+    assert Path(exe).read_bytes() == FF_BYTES
+    assert sorted(os.listdir(tmp_path / "tools" / "ffmpeg")) == ["ffmpeg-win-x86_64-v7.1.exe"]  # wheel deleted
+    assert len(calls) == 1
+
+
+def test_ffmpeg_sha256_mismatch_stops_and_leaves_no_exe(tmp_path, monkeypatch):
+    wheel = _wheel_bytes()
+    _serve_wheel(monkeypatch, wheel)
+    with pytest.raises(launcher.Stop, match="corrupt"):
+        launcher.ensure_ffmpeg(str(tmp_path), _pin(wheel, sha="0" * 64), quiet)
+    assert os.listdir(tmp_path / "tools" / "ffmpeg") == []
+
+
+def test_existing_ffmpeg_skips_the_download(tmp_path, monkeypatch):
+    wheel = _wheel_bytes()
+    pin = _pin(wheel)
+    exe = Path(launcher.ffmpeg_path(str(tmp_path), pin))
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"x")
+    calls = _serve_wheel(monkeypatch, wheel)
+    assert launcher.ensure_ffmpeg(str(tmp_path), pin, quiet) == str(exe)
+    assert calls == [] and launcher.ffmpeg_bytes_needed(str(tmp_path), pin) == 0
+
+
+def test_failed_ffmpeg_download_stops(tmp_path, monkeypatch):
+    wheel = _wheel_bytes()
+
+    def boom(req, timeout=None):
+        raise OSError("offline")
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", boom)
+    with pytest.raises(launcher.Stop, match="failed after"):
+        launcher.ensure_ffmpeg(str(tmp_path), _pin(wheel), quiet,
+                               downloader=lambda *a, **k: launcher.download_file(*a, **k, retries=0, sleep=lambda s: None))
+
+
+def test_disk_check_includes_the_wheel_size(tmp_path):
+    e = _entry(size=10 * GB)  # 11 GB of model files
+    free = 13 * GB + 100
+    assert launcher.disk_problem(e, str(tmp_path), free) is None
+    assert launcher.disk_problem(e, str(tmp_path), free, extra=1 * GB) is not None
+    assert launcher.ffmpeg_bytes_needed(str(tmp_path), {"size": 31247004, "exe": FF_EXE}) == 31247004
+
+
+def test_ffmpeg_path_and_warmup_message_reach_the_backend(tmp_path, monkeypatch, capsys):
+    envs = []
+
+    class Proc:
+        pid = 1
+        returncode = None
+
+        def __init__(self, cmd, **kw):
+            envs.append(kw.get("env"))
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(launcher.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(launcher, "data_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(launcher, "load_ffmpeg_pin", lambda: {"size": 1})
+    monkeypatch.setattr(launcher, "ffmpeg_bytes_needed", lambda d, p: 0)
+    monkeypatch.setattr(launcher, "select_model", lambda *a, **k: ("m.gguf", "p.gguf"))
+    monkeypatch.setattr(launcher, "ensure_ffmpeg", lambda d, p: r"C:\data\tools\ffmpeg\ffmpeg.exe")
+    monkeypatch.setattr(launcher, "free_port", lambda preferred, avoid=(): preferred)
+    monkeypatch.setattr(launcher, "http_get", lambda url, timeout=3: (200, '{"status":"ok"}'))
+    monkeypatch.setattr(launcher, "stop", lambda p: None)
+    monkeypatch.setattr(launcher.KillOnClose, "add", lambda self, p: None)
+    monkeypatch.setattr(launcher.subprocess, "Popen", Proc)
+    monkeypatch.setattr(launcher.webbrowser, "open", lambda u: None)
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda *a, **k: FakeResp(b"", 0, 200, FakeClock(), 0, 1))
+
+    def interrupt(_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(launcher.time, "sleep", interrupt)
+    assert launcher.main() == 0
+    assert envs[1]["FFMPEG_PATH"] == r"C:\data\tools\ffmpeg\ffmpeg.exe"
+    assert "Warming up the language model (the first start after a download can take a few minutes)..." in capsys.readouterr().out
