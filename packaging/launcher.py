@@ -27,10 +27,15 @@ BACKEND_DIR = os.path.join(ROOT, "backend")
 
 MANIFEST = os.path.join(ROOT, "models.json")
 LLM_CTX = "8192"  # measured prompts are about 5.1K to 6.4K tokens; the rest of the 8192 is the answer
+MB = 1024 ** 2
 GB = 1024 ** 3
 RECOMMEND_35B_RAM = 15 * GB   # total RAM at which the 35B is recommended (GPU memory is not used, D13)
 DISK_MARGIN = 2 * GB          # free space required beyond the download itself
 DOWNLOAD_RETRIES = 3
+SLOW_MIN_RATE = 5 * MB        # a connection averaging less than this over SLOW_WINDOW is dropped and resumed (D16)
+SLOW_WINDOW = 30              # seconds
+SLOW_RECONNECTS = 5           # per file; these do not count against DOWNLOAD_RETRIES
+WARMUP_TIMEOUT = 300          # seconds; measured 6 s with a warm file cache, but 120 s was not enough on the first run after a download (MC-8)
 PREFERRED_LLAMA_PORT = 8080
 PREFERRED_BACKEND_PORT = 8000
 LLAMA_READY_TIMEOUT = 600
@@ -258,7 +263,8 @@ def choose_model(models, ram, gpu_name, gpu_bytes, models_dir, input_fn=input, o
     out(f"  Disk:  {free / GB:.1f} GB free in {models_dir}")
     out("")
     for m in models:
-        out(f"  [{m['key']}] {m['name']}: download {download_size(m) / GB:.1f} GB")
+        out(f"  [{m['key']}] {m['name']}: download {download_size(m) / GB:.1f} GB: "
+            f"model {m['model']['size'] / GB:.1f} GB + vision {m['mmproj']['size'] / GB:.1f} GB")
     out(f"\nRecommended for this PC: {rec} ({keys[rec]['name']}).")
     while True:
         try:
@@ -343,6 +349,24 @@ def sha256_file(path, label=None, out=print, chunk=8 * 1024 * 1024):
     return h.hexdigest()
 
 
+def format_size(n):
+    """Binary units labelled GB and MB, as Windows Explorer shows them: GB with one decimal from 1 GB up, else whole MB."""
+    return f"{n / GB:.1f} GB" if n >= GB else f"{n / MB:,.0f} MB"
+
+
+def is_slow(samples, window=SLOW_WINDOW, min_rate=SLOW_MIN_RATE):
+    """samples: (seconds, total bytes) pairs of one connection, oldest first. True when the last `window` seconds
+    averaged less than `min_rate` bytes/s. False until the samples cover a full window, so a short dip never triggers."""
+    if not samples:
+        return False
+    t_end, b_end = samples[-1]
+    older = [s for s in samples if s[0] <= t_end - window]
+    if not older:
+        return False
+    t0, b0 = older[-1]
+    return (b_end - b0) / (t_end - t0) < min_rate
+
+
 def format_progress(done, total, rate, label=""):
     eta = (total - done) / rate if rate > 0 else None
     if eta is None:
@@ -351,12 +375,14 @@ def format_progress(done, total, rate, label=""):
         eta_text = f"{int(eta // 3600)}h {int(eta % 3600 // 60):02d}m"
     else:
         eta_text = f"{int(eta // 60)}m {int(eta % 60):02d}s"
-    return (f"  {label} {done / 1e6:,.0f} / {total / 1e6:,.0f} MB  {done * 100 / total:.1f}%  "
-            f"{rate / 1e6:.1f} MB/s  ETA {eta_text}   ")
+    amount = f"{done / GB:.1f} / {total / GB:.1f} GB" if total >= GB else f"{done / MB:,.0f} / {total / MB:,.0f} MB"
+    return f"  {label} {amount}  {done * 100 / total:.1f}%  {rate / MB:.1f} MB/s  ETA {eta_text}   "
 
 
-def _fetch(url, partial, total, label, out, chunk=1024 * 1024, timeout=30):
-    """One attempt: continue `partial` with a Range request. Raises OSError when the transfer breaks."""
+def _fetch(url, partial, total, label, out, chunk=1024 * 1024, timeout=30, cut_slow=False, clock=time.time):
+    """One attempt: continue `partial` with a Range request. Raises OSError when the transfer breaks.
+
+    With cut_slow, a connection that averages under SLOW_MIN_RATE over SLOW_WINDOW seconds is closed; returns True then."""
     have = os.path.getsize(partial) if os.path.isfile(partial) else 0
     req = urllib.request.Request(url, headers={"User-Agent": "Maneframe-launcher"})
     rng = range_header(have)
@@ -373,9 +399,11 @@ def _fetch(url, partial, total, label, out, chunk=1024 * 1024, timeout=30):
             mode = "ab"
         else:  # 200: the server ignored the Range header and sends the whole file
             mode, have = "wb", 0
-        start = time.time()
+        start = clock()
         got = 0
         last = 0.0
+        samples = [(start, 0)]
+        slow = False
         with open(partial, mode) as f:
             while True:
                 block = resp.read(chunk)
@@ -383,23 +411,34 @@ def _fetch(url, partial, total, label, out, chunk=1024 * 1024, timeout=30):
                     break
                 f.write(block)
                 got += len(block)
-                if time.time() - last > 0.5:
-                    last = time.time()
-                    out("\r" + format_progress(have + got, total, got / max(time.time() - start, 1e-6), label), end="", flush=True)
-        out("\r" + format_progress(have + got, total, got / max(time.time() - start, 1e-6), label), end="", flush=True)
+                now = clock()
+                samples.append((now, got))
+                if now - last > 0.5:
+                    last = now
+                    out("\r" + format_progress(have + got, total, got / max(now - start, 1e-6), label), end="", flush=True)
+                if cut_slow and is_slow(samples):
+                    slow = True
+                    break
+                while len(samples) > 1 and samples[1][0] <= now - SLOW_WINDOW:  # keep one sample at or before the window start
+                    samples.pop(0)
+        out("\r" + format_progress(have + got, total, got / max(clock() - start, 1e-6), label), end="", flush=True)
     out("")
+    return slow
 
 
 def download_file(url, dest, size, sha256, label=None, retries=DOWNLOAD_RETRIES, backoff=2.0, sleep=time.sleep,
-                  out=print, timeout=30):
+                  out=print, timeout=30, clock=time.time):
     """Downloads url to dest through dest + '.partial' (resumable), checks size and sha256, then renames.
 
     Network errors are retried `retries` times with growing waits, each retry resuming from the bytes already on disk.
+    A connection that stays under SLOW_MIN_RATE is replaced by a new Range request, SLOW_RECONNECTS times per file (D16).
     A checksum mismatch deletes the file and stops. Ctrl+C leaves the .partial file for the next start.
     """
     label = label or os.path.basename(dest)
     partial = dest + ".partial"
     attempt = 0
+    reconnects = 0
+    reconnected = False
     while True:
         if os.path.isfile(partial) and os.path.getsize(partial) > size:
             os.remove(partial)
@@ -407,9 +446,14 @@ def download_file(url, dest, size, sha256, label=None, retries=DOWNLOAD_RETRIES,
         if have == size:
             break
         try:
-            if have:
-                out(f"  Resuming {label} at {have / 1e6:,.0f} MB")
-            _fetch(url, partial, size, label, out, timeout=timeout)
+            if have and not reconnected:
+                out(f"  Resuming {label} at {format_size(have)}")
+            reconnected = False
+            if _fetch(url, partial, size, label, out, timeout=timeout, cut_slow=reconnects < SLOW_RECONNECTS, clock=clock):
+                reconnects += 1
+                reconnected = True
+                out(f"  Slow connection, reconnecting ({reconnects} of {SLOW_RECONNECTS})")
+                continue
         except (OSError, http.client.HTTPException) as e:
             out("")
             if attempt >= retries:
@@ -458,7 +502,7 @@ def ensure_model(entry, data, out=print, downloader=None):
                            "Delete it and start Maneframe again to download the right file.")
             mark_verified(data, part)
             continue
-        out(f"Downloading {part['file']} ({part['size'] / GB:.1f} GB) from huggingface.co/{entry['repo']}")
+        out(f"Downloading {part['file']} ({format_size(part['size'])}) from huggingface.co/{entry['repo']}")
         t0 = time.time()
         downloader(file_url(entry, part), path, part["size"], part["sha256"], label=part["file"], out=out)
         out(f"  {part['file']} downloaded and checked in {time.time() - t0:.0f} s")
@@ -541,9 +585,9 @@ def main():
                              "messages": [{"role": "user", "content": "Say hi."}],
                              "chat_template_kwargs": {"enable_thinking": False}}).encode())
         try:
-            urllib.request.urlopen(warm, timeout=120).read()
-        except Exception as e:  # best effort: the real run reports any actual model problem
-            print(f"Warm-up request failed (continuing): {e}")
+            urllib.request.urlopen(warm, timeout=WARMUP_TIMEOUT).read()
+        except Exception:  # best effort: the real run reports any actual model problem
+            print("Warm-up did not finish; the first commentary may take longer.")
 
         env = dict(os.environ)
         env.update({

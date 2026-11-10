@@ -1,13 +1,25 @@
 Maneframe: turns lion dance clips into funny, spoken commentary.
 
+BEFORE THE FIRST START (avoids a Windows warning every time)
+  Right-click the .zip you downloaded, choose Properties, tick "Unblock", click OK, then Extract All.
+  (You may have done this already; if there is no Unblock box, skip it.)
+
 1. Double-click "Start Maneframe.bat" (keep this folder where it is while you use the app).
-   If Windows says "Windows protected your PC", click "More info", then "Run anyway".
+   Windows may warn because the program is not code-signed:
+   - "Open File - Security Warning": click Run (untick "Always ask before opening this file").
+   - "Windows protected your PC": click "More info", then "Run anyway".
 2. Your browser opens the app. Leave the black window open; close it to stop Maneframe.
+
+The first time, Maneframe asks which language model to download from Hugging Face (Enter takes the
+recommended one):
+  35 = Qwen3.6-35B-A3B, 16.5 GB (model 15.7 GB + vision 0.8 GB), better commentary, needs about 16 GB of RAM
+   9 = Qwen3.5-9B, 6.1 GB (model 5.3 GB + vision 0.9 GB), for PCs with less memory
+A few minutes on a fast connection, much longer on slow Wi-Fi. If the download stops, start Maneframe
+again and it continues. To switch models later, double-click "Change model.bat".
+Voices (edge-tts) need an internet connection whenever you make a clip.
 
 Your files (models, uploaded clips, labels, logs) are kept in:
   %LOCALAPPDATA%\Maneframe        (paste that into the Explorer address bar)
 To remove everything, delete that folder and this one.
 
-The first time, Maneframe asks which language model to download (Enter takes the recommended
-one; 6.1 GB or 16.5 GB, needs an internet connection). If the download stops, start Maneframe
-again and it continues. To switch models later, double-click "Change model.bat".
+Licence texts of the bundled software: the THIRD_PARTY_NOTICES folder.
