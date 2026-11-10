@@ -2,7 +2,7 @@
 
 Upload a lion dance performance clip and get humorous, time-synced play-by-play commentary, read aloud while the video plays. A local vision LLM watches the footage, edge-tts (or, offline, Piper or Kokoro) speaks the lines, and the server schedules them so they never overlap.
 
-Status: v0.2.0 is tagged (git tags v0.1.0 and v0.2.0); changes after it are under Unreleased in [`CHANGELOG.md`](CHANGELOG.md). A working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
+Status: v0.3.0 is the current release, downloadable from the Releases page (git tags v0.1.0 to v0.3.0); changes after it are under Unreleased in [`CHANGELOG.md`](CHANGELOG.md). A working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
 
 ![demo](docs/demo.gif)
 

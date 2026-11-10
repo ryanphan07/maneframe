@@ -140,6 +140,7 @@ Set-Content -Path (Join-Path $notices 'INDEX.txt') -Encoding utf8 -Value @(
     'Python\            the Python runtime',
     'llama.cpp\         llama-server and its libraries',
     'python-packages\   one folder per Python package (from its .dist-info)',
+    'mutagen (python-packages\mutagen-*) is GPL-2.0-or-later; its complete source is included unchanged as the .py files in python\Lib\site-packages\mutagen. Maneframe''s own source is at https://github.com/ryanphan07/maneframe under the MIT licence.',
     'ffmpeg is not bundled: the launcher downloads it at first run from PyPI (imageio-ffmpeg), licensed GPL v3.',
     "OpenCV's opencv_videoio_ffmpeg DLL is an LGPL ffmpeg build; its licence is in opencv's LICENSE-3RD-PARTY.txt and its source is published by the opencv-python project.",
     'Language models are not bundled; they are downloaded at first run and carry their own licences (see models.json).')
