@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v0.3.0
+## v0.3.0 (tagged 2026-11-10)
 
 Changes after the v0.2.0 tag. Test counts: see docs/CONVENTIONS.md Commands.
 

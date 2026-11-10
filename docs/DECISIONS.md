@@ -140,3 +140,9 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: bundling the binary with the GPL v3 text and the corresponding source attached to each Release; or an LGPL ffmpeg build without libx264.
 - Why: the imageio-ffmpeg binary is a GPL v3 build; not distributing it removes the source-offer obligation, keeps the exact binary already tested, and makes the zip smaller.
 - Tradeoff: one more first-run download that depends on PyPI; if it cannot be downloaded the launcher stops with a message, like a failed model download.
+
+### D19. mutagen stays in the zip
+- Decision: mutagen (GPL-2.0-or-later, used to read audio durations) stays in the portable zip. Its licence text is in THIRD_PARTY_NOTICES, its complete source ships unchanged as .py files, and THIRD_PARTY_NOTICES\INDEX.txt says so.
+- Alternative considered: replacing it with a permissively licensed duration reader.
+- Why: mutagen is pure Python, so the zip already carries its source; Maneframe's own code is MIT (GPL-compatible) and public. No code change or re-test needed.
+- Tradeoff: the zip as a whole is distributed on GPL-compatible terms; a closed-source build would have to replace mutagen.

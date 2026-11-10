@@ -562,7 +562,7 @@ def ffmpeg_bytes_needed(data, pin):
 
 
 def ensure_ffmpeg(data, pin=None, out=print, downloader=None):
-    """Path of ffmpeg.exe in <data>\tools\ffmpeg, downloading the pinned wheel and extracting only the exe when missing."""
+    r"""Path of ffmpeg.exe in <data>\tools\ffmpeg, downloading the pinned wheel and extracting only the exe when missing."""
     pin = pin or load_ffmpeg_pin()
     downloader = downloader or download_file
     exe = ffmpeg_path(data, pin)
