@@ -32,7 +32,8 @@ def quiet(*args, **kwargs):
     (15 * GB, 0, "35"),
     (14.9 * GB, 8 * GB, "9"),
     (8 * GB, 4 * GB, "9"),
-    (8 * GB, 16 * GB, "35"),        # 16 GB of GPU memory alone is enough
+    (8 * GB, 16 * GB, "9"),         # GPU memory does not count
+    (14.9 * GB, 23.8 * GB, "9"),    # an iGPU's reported shared memory does not count
     (None, None, "9"),              # nothing detected: the safe choice
 ])
 def test_recommend(ram, gpu, want):

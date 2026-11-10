@@ -28,8 +28,7 @@ BACKEND_DIR = os.path.join(ROOT, "backend")
 MANIFEST = os.path.join(ROOT, "models.json")
 LLM_CTX = "8192"  # measured prompts are about 5.1K to 6.4K tokens; the rest of the 8192 is the answer
 GB = 1024 ** 3
-RECOMMEND_35B_RAM = 15 * GB   # total RAM at which the 35B is recommended
-RECOMMEND_35B_GPU = 16 * GB   # or this much GPU memory
+RECOMMEND_35B_RAM = 15 * GB   # total RAM at which the 35B is recommended (GPU memory is not used, D13)
 DISK_MARGIN = 2 * GB          # free space required beyond the download itself
 DOWNLOAD_RETRIES = 3
 PREFERRED_LLAMA_PORT = 8080
@@ -210,8 +209,9 @@ def gpu_info(llama=LLAMA):
 
 
 def recommend(ram_bytes, gpu_bytes):
-    """The 35B needs about 16 GB of memory for the model and its cache; below that the 9B is the safe choice."""
-    if (ram_bytes or 0) >= RECOMMEND_35B_RAM or (gpu_bytes or 0) >= RECOMMEND_35B_GPU:
+    """The 35B when total RAM is at least 15 GB, else the 9B. gpu_bytes is shown on screen only: llama.cpp reports an
+    integrated GPU's shared memory, not dedicated memory, so it says nothing about what the PC can run."""
+    if (ram_bytes or 0) >= RECOMMEND_35B_RAM:
         return "35"
     return "9"
 
