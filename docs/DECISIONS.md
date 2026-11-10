@@ -115,7 +115,7 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: copying the runtime DLLs next to llama-server.exe (app-local deployment).
 - Why: no redistribution setup and nothing extra to keep up to date in the build; most Windows PCs already have the runtime.
 - Tradeoff: a user without it installs one Microsoft package once before the first run.
-- Status (s57): not implemented as written. `scripts/package.ps1` has copied msvcp140, msvcp140_1, vcruntime140 and vcruntime140_1 from the build PC's System32 next to python.exe and llama-server.exe since s55, so the DLL audit found no runtime DLL missing from the zip and no detection message was built. Owner to confirm which D14 text stands (see the s57 handoff).
+- Superseded by D17.
 
 ### D15. First releases are unsigned
 - Decision: the zip is published without code signing. The README and Read me first.txt explain the Windows warning ("Open File - Security Warning" or SmartScreen) and how to avoid it by unblocking the zip before extracting.
@@ -128,3 +128,15 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: keeping one connection until it fails (s56 behavior).
 - Why: on 2026-11-10 one Hugging Face connection ran at 1.8 MB/s for 29 minutes on a 1 Gbps line; the next connection ran at 67 MB/s.
 - Tradeoff: on a line that is really slower than 5 MB/s, the launcher reconnects 5 times for nothing (a second or two each).
+
+### D17. Visual C++ runtime is bundled with the zip
+- Decision: the zip carries msvcp140, msvcp140_1, vcruntime140 and vcruntime140_1 next to python.exe and llama-server.exe (app-local deployment, copied by `scripts/package.ps1` since s55). Supersedes D14.
+- Alternative considered: D14 as written: no runtime in the zip, and a launcher message pointing to Microsoft's installer when a DLL is missing.
+- Why: it was already built and tested that way (MC-8), and teammates on a fresh PC get no missing-DLL error.
+- Tradeoff: the bundled copies are the build PC's versions and are not updated by Windows Update; each new zip carries whatever the build PC has.
+
+### D18. ffmpeg is downloaded at first run, not bundled
+- Decision: the zip contains no ffmpeg executable. On first run the launcher downloads the pinned imageio-ffmpeg wheel (the version in backend/requirements.txt) from PyPI, checks its sha256, extracts the ffmpeg executable into the data folder and passes it to the backend as FFMPEG_PATH. Running from the repo is unchanged.
+- Alternative considered: bundling the binary with the GPL v3 text and the corresponding source attached to each Release; or an LGPL ffmpeg build without libx264.
+- Why: the imageio-ffmpeg binary is a GPL v3 build; not distributing it removes the source-offer obligation, keeps the exact binary already tested, and makes the zip smaller.
+- Tradeoff: one more first-run download that depends on PyPI; if it cannot be downloaded the launcher stops with a message, like a failed model download.

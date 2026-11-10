@@ -8,6 +8,13 @@ Status: v0.2.0 is tagged (git tags v0.1.0 and v0.2.0); changes after it are unde
 
 [Full clip with sound](docs/demo.mp4) (screen recording of the app playing a 40 s clip with generated commentary).
 
+## Highlights
+- A local multimodal LLM (Qwen via llama.cpp) watches 10 s windows of video and writes time-synced commentary; speech by edge-tts, Piper or Kokoro, scheduled so lines never overlap.
+- FastAPI backend with background jobs and WebSocket progress; React/Vite player that plays finished commentary while later parts are still processing.
+- Blind evaluation of commentary grounding (shuffled review, Wilson intervals, a win rule fixed in advance) across prompt, frame and model variants: `docs/research/grounding.md`.
+- Measured, not guessed: per-call profiling of local inference, phone-clip conversion cut from 25+ min to about 1 min, a 327 s performance processed end to end in 23 min on Qwen3.6-35B-A3B: `docs/BENCHMARKS.md`.
+- mp4 export (original or vertical 9:16, trim, captions), a portable Windows zip with first-run model download, backend and frontend tests, Playwright browser checks and GitHub Actions CI.
+
 ## How it works
 
 ```
@@ -41,7 +48,7 @@ Key design points:
 
 ## Download and run (Windows)
 
-For team members: no Python, Node, ffmpeg or git needed. Windows 10 or 11, 64-bit, about 16 GB of memory for the better model. The first run downloads a language model, so it needs an internet connection and 8 to 19 GB of free disk space (the download plus 2 GB).
+For team members: no Python, Node, ffmpeg or git needed (the video tool is downloaded for you on the first run). Windows 10 or 11, 64-bit, about 16 GB of memory for the better model. The first run downloads a language model and the video tool (ffmpeg, 30 MB), so it needs an internet connection and 8 to 19 GB of free disk space (the download plus 2 GB).
 
 1. Download `maneframe-<version>-win64.zip` from the Releases page of this repository on GitHub.
 2. Right-click the zip, choose Properties, tick **Unblock** at the bottom, click OK. (This avoids a Windows warning every time you start Maneframe. If there is no Unblock box, skip this step.)
@@ -56,7 +63,7 @@ For team members: no Python, Node, ffmpeg or git needed. Windows 10 or 11, 64-bi
    The model is downloaded once from Hugging Face and checked against a checksum: a few minutes on a fast connection, much longer on slow Wi-Fi (one 35B download took 33 minutes). If it is interrupted, or you close the window, start Maneframe again and it continues where it stopped. A connection that crawls is dropped and resumed automatically.
 6. The browser opens. Keep the black window open while you use Maneframe; close it, or press Ctrl+C, to stop. Ports start at 8080 (language model) and 8000 (app) and move up when taken.
 
-To switch models later, double-click `Change model.bat` (downloaded models are kept, so switching back needs no download). Commentary voices use edge-tts, so generating the audio needs internet even after the model is downloaded.
+To switch models later, double-click `Change model.bat` (downloaded models are kept, so switching back needs no download). Commentary voices use edge-tts, so generating the audio needs internet even after the model and the video tool are downloaded.
 
 Where things are: the models, your uploaded clips, labels and logs live in `%LOCALAPPDATA%\Maneframe` (paste that into the Explorer address bar), or in the folder named by the `MANEFRAME_DATA_DIR` environment variable, so a newer zip reuses the model. Deleting the unzipped folder does not remove them. To remove Maneframe completely, delete the unzipped folder and the `%LOCALAPPDATA%\Maneframe` folder. The licence texts of the bundled software are in the `THIRD_PARTY_NOTICES` folder of the zip.
 

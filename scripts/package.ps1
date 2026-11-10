@@ -66,6 +66,13 @@ $req = Join-Path $root 'backend\requirements.txt'
 if (Select-String -Path $req -Pattern 'piper|kokoro' -Quiet) { Fail 'requirements.txt lists piper or kokoro; the package excludes them.' }
 Run $venvPython @('-m', 'pip', 'install', '--disable-pip-version-check', '--no-compile', '--target', $site, '--only-binary=:all:',
     '--platform', 'win_amd64', '--python-version', '3.12', '--implementation', 'cp', '-r', $req)
+# ffmpeg is not bundled (D18): drop the GPL binary that imageio-ffmpeg ships; the launcher downloads it at first run
+$ffPin = Get-Content (Join-Path $root 'packaging\ffmpeg.json') -Raw | ConvertFrom-Json
+if (-not (Select-String -Path $req -Pattern ("^imageio-ffmpeg==" + [regex]::Escape($ffPin.version) + "\s*$") -Quiet)) {
+    Fail "packaging\ffmpeg.json version $($ffPin.version) differs from the imageio-ffmpeg pin in backend\requirements.txt"
+}
+$ffBin = Join-Path $site 'imageio_ffmpeg\binaries'
+if (Test-Path $ffBin) { Get-ChildItem $ffBin -Force | Remove-Item -Recurse -Force }
 # VC++ runtime DLLs next to python.exe and llama-server.exe (app-local deployment) for machines without the redistributable
 $vcDlls = 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'
 
@@ -92,6 +99,7 @@ Copy-Item (Join-Path $root 'frontend\dist') (Join-Path $stage 'frontend\dist') -
 Copy-Item (Join-Path $root 'packaging\Start Maneframe.bat') $stage
 Copy-Item (Join-Path $root 'packaging\launcher.py') $stage
 Copy-Item (Join-Path $root 'packaging\models.json') $stage
+Copy-Item (Join-Path $root 'packaging\ffmpeg.json') $stage
 Copy-Item (Join-Path $root 'packaging\Change model.bat') $stage
 Copy-Item (Join-Path $root 'packaging\Read me first.txt') $stage
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
@@ -132,12 +140,17 @@ Set-Content -Path (Join-Path $notices 'INDEX.txt') -Encoding utf8 -Value @(
     'Python\            the Python runtime',
     'llama.cpp\         llama-server and its libraries',
     'python-packages\   one folder per Python package (from its .dist-info)',
+    'ffmpeg is not bundled: the launcher downloads it at first run from PyPI (imageio-ffmpeg), licensed GPL v3.',
+    "OpenCV's opencv_videoio_ffmpeg DLL is an LGPL ffmpeg build; its licence is in opencv's LICENSE-3RD-PARTY.txt and its source is published by the opencv-python project.",
     'Language models are not bundled; they are downloaded at first run and carry their own licences (see models.json).')
 Write-Host ("  licence files for Python, llama.cpp and {0} packages" -f $count)
 if ($noLicense.Count) { Write-Host ("  NO licence file in: " + ($noLicense -join ', ')) -ForegroundColor Yellow }
 
 # Precompile so the first start is not slow (bytecode is not written at run time)
 Run (Join-Path $pyDir 'python.exe') @('-m', 'compileall', '-q', '-j', '0', $site, (Join-Path $stage 'backend\app'))
+
+$ffLeft = @(Get-ChildItem $stage -Recurse -File -Filter 'ffmpeg*.exe')
+if ($ffLeft.Count) { Fail ("ffmpeg executable still in the stage: " + ($ffLeft.FullName -join ', ')) }
 
 # 5. Zip (.NET writes forward-slash entries; Compress-Archive in 5.1 does not)
 Write-Host '== zip =='
