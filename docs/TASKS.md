@@ -39,7 +39,8 @@ The goal is a better product for real users: lion dance teams turning performanc
 
 ## Phase 3: distribution
 Local only, no hosted service (D6). Packaging is a portable Windows zip (D10), model chosen at first run (D11), data in %LOCALAPPDATA%\Maneframe (D12).
-- Done (s55): `scripts/package.ps1` builds the zip; `packaging/` holds the launcher and Start Maneframe.bat. Models are placed by hand.
+- Done (s55): `scripts/package.ps1` builds the zip; `packaging/` holds the launcher and Start Maneframe.bat. Models were placed by hand.
+- Done (s56): first-run chooser and downloader (`packaging/models.json`, Hugging Face, resume, sha256), Change model.bat.
 - Next (s56): first-run model chooser and downloader with checksum.
 - Open: code signing, auto-update, voice options beyond edge-tts (D7).
 
