@@ -8,6 +8,6 @@ Your files (models, uploaded clips, labels, logs) are kept in:
   %LOCALAPPDATA%\Maneframe        (paste that into the Explorer address bar)
 To remove everything, delete that folder and this one.
 
-Until the model downloader exists, the language model must be placed by hand in
-  %LOCALAPPDATA%\Maneframe\models
-If it is missing, Maneframe tells you the exact file names when you start it.
+The first time, Maneframe asks which language model to download (Enter takes the recommended
+one; 6.1 GB or 16.5 GB, needs an internet connection). If the download stops, start Maneframe
+again and it continues. To switch models later, double-click "Change model.bat".

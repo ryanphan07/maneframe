@@ -44,15 +44,17 @@ Key design points:
 For team members: no Python, Node, ffmpeg or git needed. Windows 10 or 11, 64-bit, about 16 GB of memory for the 35B model.
 
 1. Unzip `maneframe-<version>-win64.zip` anywhere (not inside a zip viewer; use "Extract All").
-2. Put the language model by hand (the first-run chooser and downloader are planned, DECISIONS D11): create `%LOCALAPPDATA%\Maneframe\models` (paste that into the Explorer address bar) and copy `Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf` and `mmproj-Qwen3.6-35B-F16.gguf` into it. If they are missing, Start Maneframe.bat prints the exact folder and file names and stops.
-3. Double-click `Start Maneframe.bat`. The first time, Windows SmartScreen says "Windows protected your PC" (the package is not code-signed): click "More info", then "Run anyway".
+2. Double-click `Start Maneframe.bat`. The first time, Windows SmartScreen says "Windows protected your PC" (the package is not code-signed): click "More info", then "Run anyway".
+3. First run only: the black window shows this PC's memory, graphics card and free disk space, and offers two language models. Press Enter for the recommended one, or type `9` or `35`. The 35B (Qwen3.6-35B-A3B) is a 16.5 GB download and gives the better commentary; it is recommended with 15 GB of RAM or more. The 9B (Qwen3.5-9B) is a 6.1 GB download for PCs with less memory. The download shows progress, resumes if it is interrupted (or if you close the window and start again) and is checked against a checksum; on one PC at about 70 MB/s the 9B took 2 minutes, and the 35B would take about 5 (estimated, not finished; slower connections take longer). It needs the download size plus 2 GB of free disk space.
 4. The browser opens. Keep the black window open; close it (or press Ctrl+C) to stop Maneframe. Ports start at 8080 (language model) and 8000 (app) and move up when taken.
+
+To switch models later, double-click `Change model.bat` (downloaded models are kept, so switching back needs no download). The models are saved in `%LOCALAPPDATA%\Maneframe\models`, the choice in `config.json` next to it; if you place the model files there by hand, they are checked once and then used.
 
 Data (models, uploads, labels, logs) lives in `%LOCALAPPDATA%\Maneframe`, or in the folder named by the `MANEFRAME_DATA_DIR` environment variable, so a newer zip reuses the model. Deleting the unzipped folder does not remove it; to uninstall, delete both folders. Speech is edge-tts, so clips need internet for audio.
 
 ### Building the zip
 
-Developers, from the repo root with the backend venv, Node and internet: `.\scripts\package.ps1` writes `build\maneframe-<git describe>-win64.zip` (git-ignored). It builds `frontend\dist`, unpacks the python.org embeddable Python 3.12 and installs `backend\requirements.txt` into it from wheels (no Piper or Kokoro), adds the llama.cpp `b10679` Vulkan `llama-server` with its license, copies `backend\app`, and adds `packaging\launcher.py` and `Start Maneframe.bat`. The launcher runs on the package's own Python and passes settings to the backend as environment variables (`UPLOAD_DIR`, `LABELS_DIR`, `LLM_BASE_URL`, `PUBLIC_BASE_URL`).
+Developers, from the repo root with the backend venv, Node and internet: `.\scripts\package.ps1` writes `build\maneframe-<git describe>-win64.zip` (git-ignored). It builds `frontend\dist`, unpacks the python.org embeddable Python 3.12 and installs `backend\requirements.txt` into it from wheels (no Piper or Kokoro), adds the llama.cpp `b10679` Vulkan `llama-server` with its license, copies `backend\app`, and adds `packaging\launcher.py`, `models.json` (the two models: Hugging Face repo, pinned commit, file sizes, sha256, license) and `Start Maneframe.bat` and `Change model.bat`. The sha256 of the Python and llama.cpp downloads is pinned in the script. The launcher runs on the package's own Python and passes settings to the backend as environment variables (`UPLOAD_DIR`, `LABELS_DIR`, `LLM_BASE_URL`, `PUBLIC_BASE_URL`).
 
 ## Quickstart (PowerShell, from the repo root)
 
