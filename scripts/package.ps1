@@ -2,7 +2,7 @@
 Builds the portable Windows package: build\maneframe-<git describe>-win64.zip. Run from the repo root on a machine with
 Node, git, the backend venv (Python 3.12) and internet. Not run in CI. Nothing in build\ is ever committed.
 Contents: private Python (python.org embeddable) + backend\requirements.txt, frontend\dist, backend\app, the llama.cpp
-Vulkan llama-server (pinned) with its LICENSE, and Start Maneframe.bat, Change model.bat, launcher.py and models.json from packaging\.
+Vulkan llama-server (pinned) with its LICENSE, THIRD_PARTY_NOTICES (licence texts copied from each component), and Start Maneframe.bat, Change model.bat, launcher.py and models.json from packaging\.
 #>
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -96,6 +96,45 @@ Copy-Item (Join-Path $root 'packaging\Change model.bat') $stage
 Copy-Item (Join-Path $root 'packaging\Read me first.txt') $stage
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
 Set-Content -Path (Join-Path $stage 'VERSION.txt') -Encoding ascii -Value $version
+
+# 4b. Licence texts of everything bundled, copied from the files themselves (nothing is written by hand)
+Write-Host '== licence notices =='
+$notices = Join-Path $stage 'THIRD_PARTY_NOTICES'
+$licPattern = '^(LICEN[CS]E|COPYING|NOTICE|COPYRIGHT)'
+function Copy-Notice($src, $destDir) {
+    New-Item -ItemType Directory -Force $destDir | Out-Null
+    Copy-Item $src $destDir -Force
+}
+$pyLicense = Join-Path $pyDir 'LICENSE.txt'
+if (-not (Test-Path $pyLicense)) { Fail 'python\LICENSE.txt missing from the embeddable Python' }
+Copy-Notice $pyLicense (Join-Path $notices 'Python')
+foreach ($f in 'LICENSE', 'LICENSE-LLVM-OpenMP') {
+    $src = Join-Path $llamaDir $f
+    if (Test-Path $src) { Copy-Notice $src (Join-Path $notices 'llama.cpp') } elseif ($f -eq 'LICENSE') { Fail 'llama.cpp LICENSE missing' }
+}
+$noLicense = @()
+$count = 0
+foreach ($di in Get-ChildItem $site -Directory -Filter '*.dist-info') {
+    $files = @(Get-ChildItem $di.FullName -Recurse -File | Where-Object { $_.Name -match $licPattern })
+    if ($files.Count -eq 0) { $noLicense += $di.Name -replace '\.dist-info$', ''; continue }
+    $dest = Join-Path $notices (Join-Path 'python-packages' ($di.Name -replace '\.dist-info$', ''))
+    New-Item -ItemType Directory -Force $dest | Out-Null
+    foreach ($f in $files) {
+        $rel = $f.FullName.Substring($di.FullName.Length).TrimStart([char]92)
+        $target = Join-Path $dest $rel
+        New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+        Copy-Item $f.FullName $target -Force
+    }
+    $count++
+}
+Set-Content -Path (Join-Path $notices 'INDEX.txt') -Encoding utf8 -Value @(
+    'Licence texts of the software bundled in this package, copied unchanged from each component at build time.',
+    'Python\            the Python runtime',
+    'llama.cpp\         llama-server and its libraries',
+    'python-packages\   one folder per Python package (from its .dist-info)',
+    'Language models are not bundled; they are downloaded at first run and carry their own licences (see models.json).')
+Write-Host ("  licence files for Python, llama.cpp and {0} packages" -f $count)
+if ($noLicense.Count) { Write-Host ("  NO licence file in: " + ($noLicense -join ', ')) -ForegroundColor Yellow }
 
 # Precompile so the first start is not slow (bytecode is not written at run time)
 Run (Join-Path $pyDir 'python.exe') @('-m', 'compileall', '-q', '-j', '0', $site, (Join-Path $stage 'backend\app'))

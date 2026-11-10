@@ -107,3 +107,24 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: also recommending the 35B at 16 GB of GPU memory, as specified for s56.
 - Why: llama.cpp reports an integrated GPU's shared memory, not dedicated memory (23.8 GB on the development PC with 15.6 GB of RAM), so a GPU rule would recommend a 16.5 GB download to laptops that cannot run it.
 - Tradeoff: a PC with a large discrete GPU but less than 15 GB of RAM is offered the 9B; the user can still type 35.
+
+## 2026-11-10
+
+### D14. Missing Visual C++ runtime: detect and explain
+- Decision: the zip does not bundle the Visual C++ runtime. When llama-server cannot start because a DLL is missing, the launcher says which runtime to install and gives Microsoft's official installer link.
+- Alternative considered: copying the runtime DLLs next to llama-server.exe (app-local deployment).
+- Why: no redistribution setup and nothing extra to keep up to date in the build; most Windows PCs already have the runtime.
+- Tradeoff: a user without it installs one Microsoft package once before the first run.
+- Status (s57): not implemented as written. `scripts/package.ps1` has copied msvcp140, msvcp140_1, vcruntime140 and vcruntime140_1 from the build PC's System32 next to python.exe and llama-server.exe since s55, so the DLL audit found no runtime DLL missing from the zip and no detection message was built. Owner to confirm which D14 text stands (see the s57 handoff).
+
+### D15. First releases are unsigned
+- Decision: the zip is published without code signing. The README and Read me first.txt explain the Windows warning ("Open File - Security Warning" or SmartScreen) and how to avoid it by unblocking the zip before extracting.
+- Alternative considered: buying a code-signing certificate or signing service before the first release.
+- Why: no cost before anyone outside the team has used the app.
+- Tradeoff: users who download the zip see an "unknown publisher" warning, which some will not get past.
+
+### D16. Reconnect a slow download
+- Decision: when a model download averages under 5 MB/s over 30 s, the launcher closes the connection and resumes with a new request (Range), at most 5 times per file, then keeps the connection it has. These reconnects do not count against the 3 error retries.
+- Alternative considered: keeping one connection until it fails (s56 behavior).
+- Why: on 2026-11-10 one Hugging Face connection ran at 1.8 MB/s for 29 minutes on a 1 Gbps line; the next connection ran at 67 MB/s.
+- Tradeoff: on a line that is really slower than 5 MB/s, the launcher reconnects 5 times for nothing (a second or two each).

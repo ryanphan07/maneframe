@@ -121,6 +121,7 @@ def test_chooser_enter_takes_recommendation_and_override(tmp_path, monkeypatch):
     assert pick["key"] == "35"
     text = "\n".join(lines)
     assert "15.6 GB" in text and "GPU X" in text and "500.0 GB free" in text and "Recommended for this PC: 35" in text
+    assert "download 16.5 GB: model 15.7 GB + vision 0.8 GB" in text
     answers = iter(["x", "9"])
     assert launcher.choose_model(models, int(15.6 * GB), "GPU X", None, str(tmp_path), lambda _: next(answers), quiet)["key"] == "9"
 
@@ -242,6 +243,109 @@ def test_download_retries_a_dropped_connection_and_resumes(server, tmp_path):
     assert Path(dest).read_bytes() == PAYLOAD
     assert sleeps == [2.0]
     assert RangeHandler.seen[0] is None and RangeHandler.seen[1].startswith("bytes=")
+
+
+# ---- slow-connection reconnect (D16) ----
+
+MB = launcher.MB
+
+
+def test_is_slow_needs_a_full_window_of_slow_samples():
+    assert not launcher.is_slow([])
+    assert not launcher.is_slow([(0, 0), (20, 1 * MB)])           # slow, but only 20 s so far
+    assert launcher.is_slow([(0, 0), (30, 30 * MB)])              # 1 MB/s for 30 s
+    assert not launcher.is_slow([(0, 0), (30, 150 * MB)])         # exactly 5 MB/s is fine
+    assert launcher.is_slow([(0, 0), (31, 31 * MB)])
+
+
+def test_is_slow_ignores_a_short_dip():
+    fast = [(t, t * 20 * MB) for t in range(0, 20)]               # 20 MB/s
+    dip = [(t, 19 * 20 * MB + (t - 19) * MB) for t in range(20, 26)]  # 6 s at 1 MB/s
+    assert not launcher.is_slow(fast + dip)
+    # a long slow stretch after a fast start is caught once the last 30 s average under 5 MB/s
+    slow = [(t, 19 * 20 * MB + (t - 19) * MB) for t in range(20, 80)]
+    assert launcher.is_slow(fast + slow)
+
+
+def test_format_size_uses_binary_units():
+    assert launcher.format_size(int(15.7 * GB)) == "15.7 GB"
+    assert launcher.format_size(GB) == "1.0 GB"
+    assert launcher.format_size(1024 * MB - 1) == "1,024 MB"
+    assert launcher.format_size(44 * MB) == "44 MB"
+    assert "3.0 / 15.7 GB" in launcher.format_progress(3 * GB, int(15.7 * GB), 2 * MB)
+    assert "44 / 100 MB" in launcher.format_progress(44 * MB, 100 * MB, 2 * MB)
+    assert "2.0 MB/s" in launcher.format_progress(44 * MB, 100 * MB, 2 * MB)
+
+
+class FakeResp:
+    """Streams payload[start:] in 1 MB-like pieces, advancing a fake clock by `step` seconds per read."""
+
+    def __init__(self, payload, start, status, clock, step, piece):
+        self.data, self.pos, self.status, self.clock, self.step, self.piece = payload, start, status, clock, step, piece
+        self.closed = False
+
+    def read(self, n):
+        self.clock.t += self.step
+        block = self.data[self.pos:self.pos + self.piece]
+        self.pos += len(block)
+        return block
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.closed = True
+
+
+class FakeClock:
+    t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def _fake_server(monkeypatch, payload, steps):
+    """steps: seconds per read for the 1st, 2nd... connection (the last repeats). Returns the list of Range headers."""
+    clock, seen, conns = FakeClock(), [], []
+
+    def fake_urlopen(req, timeout=None):
+        rng = req.headers.get("Range")
+        seen.append(rng)
+        start = int(rng.split("=")[1].rstrip("-")) if rng else 0
+        step = steps[min(len(seen) - 1, len(steps) - 1)]
+        r = FakeResp(payload, start, 206 if rng else 200, clock, step, 100_000)
+        conns.append(r)
+        return r
+
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", fake_urlopen)
+    return clock, seen, conns
+
+
+def test_slow_connection_is_replaced_and_resumes_at_the_right_byte(tmp_path, monkeypatch):
+    payload = os.urandom(3_000_000)
+    clock, seen, conns = _fake_server(monkeypatch, payload, [10.0, 0.001])  # 1st: 100 KB per 10 s; then fast
+    lines = []
+    dest = str(tmp_path / "f.bin")
+    launcher.download_file("http://x/f.bin", dest, len(payload), hashlib.sha256(payload).hexdigest(),
+                           out=lambda *a, **k: lines.append(a[0] if a else ""), sleep=lambda s: None, clock=clock)
+    assert Path(dest).read_bytes() == payload
+    assert len(seen) == 2 and seen[0] is None
+    assert seen[1] == f"bytes={conns[0].pos}-" and 0 < conns[0].pos < len(payload)
+    assert conns[0].closed
+    assert sum("Slow connection, reconnecting (1 of 5)" in str(x) for x in lines) == 1
+
+
+def test_reconnects_stop_after_five_then_the_connection_is_kept(tmp_path, monkeypatch):
+    payload = os.urandom(2_000_000)
+    clock, seen, conns = _fake_server(monkeypatch, payload, [10.0])  # every connection is slow
+    lines = []
+    dest = str(tmp_path / "f.bin")
+    launcher.download_file("http://x/f.bin", dest, len(payload), hashlib.sha256(payload).hexdigest(),
+                           out=lambda *a, **k: lines.append(a[0] if a else ""), sleep=lambda s: None, clock=clock)
+    assert Path(dest).read_bytes() == payload
+    assert len(seen) == 6                                  # 5 replaced connections, the 6th is kept to the end
+    assert sum("Slow connection" in str(x) for x in lines) == 5
+    assert not any("retry" in str(x) for x in lines)       # reconnects are not error retries
 
 
 def test_download_gives_up_after_three_retries(tmp_path):
