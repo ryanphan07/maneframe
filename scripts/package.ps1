@@ -2,7 +2,7 @@
 Builds the portable Windows package: build\maneframe-<git describe>-win64.zip. Run from the repo root on a machine with
 Node, git, the backend venv (Python 3.12) and internet. Not run in CI. Nothing in build\ is ever committed.
 Contents: private Python (python.org embeddable) + backend\requirements.txt, frontend\dist, backend\app, the llama.cpp
-Vulkan llama-server (pinned) with its LICENSE, and Start Maneframe.bat + launcher.py from packaging\.
+Vulkan llama-server (pinned) with its LICENSE, and Start Maneframe.bat, Change model.bat, launcher.py and models.json from packaging\.
 #>
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -13,6 +13,8 @@ $pyVersion = '3.12.10'   # must match the venv's minor version (3.12), wheels ar
 $llamaTag = 'b10679'
 $pyUrl = "https://www.python.org/ftp/python/$pyVersion/python-$pyVersion-embed-amd64.zip"
 $llamaUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$llamaTag/llama-$llamaTag-bin-win-vulkan-x64.zip"
+$pySha = '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3'      # python.org, checked twice on 2026-11-09
+$llamaSha = 'd288a375a324f650a587d3b876afe692ca3586110f20b863fadbe91dd3b93469'   # matches GitHub's release digest
 $llamaLicenseUrl = "https://raw.githubusercontent.com/ggml-org/llama.cpp/$llamaTag/LICENSE"
 
 function Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
@@ -32,10 +34,12 @@ if (Test-Path (Join-Path $build 'stage')) { Remove-Item -Recurse -Force (Join-Pa
 if (Test-Path $zip) { Remove-Item -Force $zip }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-function Get-Cached($url) {
+function Get-Cached($url, $sha256) {
     $file = Join-Path $cache ([IO.Path]::GetFileName(([uri]$url).AbsolutePath))
     if (-not (Test-Path $file)) { Write-Host "Downloading $url"; Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing }
-    Write-Host ("  {0}  sha256 {1}" -f (Split-Path $file -Leaf), (Get-FileHash $file -Algorithm SHA256).Hash.ToLower())
+    $got = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+    if ($got -ne $sha256) { Remove-Item -Force $file; Fail "sha256 mismatch for $(Split-Path $file -Leaf): got $got, expected $sha256 (file deleted)" }
+    Write-Host ("  {0}  sha256 ok" -f (Split-Path $file -Leaf))
     return $file
 }
 
@@ -51,7 +55,7 @@ if (-not (Test-Path (Join-Path $root 'frontend\dist\index.html'))) { Fail 'front
 # 2. Python: the embeddable runtime, then the packages installed into it from wheels (no pip inside the package)
 Write-Host '== python =='
 $pyDir = Join-Path $stage 'python'
-Expand-Archive -Path (Get-Cached $pyUrl) -DestinationPath $pyDir
+Expand-Archive -Path (Get-Cached $pyUrl $pySha) -DestinationPath $pyDir
 $pth = Get-ChildItem $pyDir -Filter 'python*._pth' | Select-Object -First 1
 $zipName = (Get-ChildItem $pyDir -Filter 'python*.zip' | Select-Object -First 1).Name
 # Paths are relative to the ._pth file. ..\backend makes "app" importable with the backend as working directory.
@@ -68,7 +72,7 @@ $vcDlls = 'msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.
 # 3. llama.cpp (Vulkan build, pinned tag) and its license
 Write-Host '== llama.cpp =='
 $llamaDir = Join-Path $stage 'llama'
-Expand-Archive -Path (Get-Cached $llamaUrl) -DestinationPath $llamaDir
+Expand-Archive -Path (Get-Cached $llamaUrl $llamaSha) -DestinationPath $llamaDir
 if (-not (Test-Path (Join-Path $llamaDir 'llama-server.exe'))) { Fail 'llama-server.exe not found in the llama.cpp zip' }
 Invoke-WebRequest -Uri $llamaLicenseUrl -OutFile (Join-Path $llamaDir 'LICENSE') -UseBasicParsing
 # Only llama-server is used; drop the other tools to keep the zip small
@@ -87,6 +91,8 @@ New-Item -ItemType Directory -Force (Join-Path $stage 'frontend') | Out-Null
 Copy-Item (Join-Path $root 'frontend\dist') (Join-Path $stage 'frontend\dist') -Recurse
 Copy-Item (Join-Path $root 'packaging\Start Maneframe.bat') $stage
 Copy-Item (Join-Path $root 'packaging\launcher.py') $stage
+Copy-Item (Join-Path $root 'packaging\models.json') $stage
+Copy-Item (Join-Path $root 'packaging\Change model.bat') $stage
 Copy-Item (Join-Path $root 'packaging\Read me first.txt') $stage
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
 Set-Content -Path (Join-Path $stage 'VERSION.txt') -Encoding ascii -Value $version

@@ -1,0 +1,44 @@
+{
+  "models": [
+    {
+      "id": "qwen3.6-35b-a3b-ud-q3_k_xl",
+      "key": "35",
+      "name": "Qwen3.6-35B-A3B (better commentary, about 16 GB of memory)",
+      "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "revision": "a483e9e6cbd595906af30beda3187c2663a1118c",
+      "license": "apache-2.0",
+      "model": {
+        "file": "Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
+        "remote": "Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf",
+        "size": 16845511648,
+        "sha256": "a832b9689925f1bd335bbe985cdfb06c36bf2cf268f4f8f6eceafa3ceb515617"
+      },
+      "mmproj": {
+        "file": "mmproj-Qwen3.6-35B-F16.gguf",
+        "remote": "mmproj-F16.gguf",
+        "size": 899283680,
+        "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f"
+      }
+    },
+    {
+      "id": "qwen3.5-9b-q4_k_m",
+      "key": "9",
+      "name": "Qwen3.5-9B (smaller, for PCs with less memory)",
+      "repo": "unsloth/Qwen3.5-9B-GGUF",
+      "revision": "3885219b6810b007914f3a7950a8d1b469d598a5",
+      "license": "apache-2.0",
+      "model": {
+        "file": "Qwen3.5-9B-Q4_K_M.gguf",
+        "remote": "Qwen3.5-9B-Q4_K_M.gguf",
+        "size": 5680522464,
+        "sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8"
+      },
+      "mmproj": {
+        "file": "mmproj-Qwen3.5-9B-F16.gguf",
+        "remote": "mmproj-F16.gguf",
+        "size": 918166080,
+        "sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+      }
+    }
+  ]
+}
