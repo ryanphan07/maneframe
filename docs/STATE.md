@@ -59,6 +59,7 @@ Browser-verified 2026-11-05 (`cd frontend; npm run test:e2e`, Playwright Chromiu
 - Verified 2026-10-28: a brand-new venv from `requirements-dev.txt` passes all tests; a fresh `npm ci` passes lint and build.
 - `backend/requirements.txt` is pinned (includes `websockets`, required by uvicorn for the WS route); `backend/requirements-dev.txt` adds pytest.
 - Windows native, no Docker.
+- Portable zip (s55, DECISIONS D10 to D12): `scripts/package.ps1` builds `build/maneframe-<version>-win64.zip` (embeddable Python + packages, frontend/dist, backend/app, llama.cpp b10679 Vulkan, `packaging/launcher.py`, Start Maneframe.bat). The launcher picks free ports (8080/8000 preferred), starts llama-server and the backend with settings as environment variables, and stops both on close or Ctrl+C (Windows job object). Data is in %LOCALAPPDATA%\Maneframe or MANEFRAME_DATA_DIR. The model is placed by hand until s56. Tested on this PC with a reduced PATH; double-click in Explorer and a machine without the VC++ runtime are untested (MC-8).
 - llama-server at 127.0.0.1:8080 with `--mmproj`. In use now: Qwen3.5-9B Q4_K_M; Qwen3.6-35B-A3B is the intended model for real runs (unmeasured).
 - edge-tts must be >= 7.3.1 (7.2.8 gets 403).
 

@@ -4,6 +4,7 @@
 
 Changes after the v0.2.0 tag. Test counts: 358 backend, 36 frontend (2026-11-06).
 
+- Portable Windows zip: `scripts/package.ps1` builds `build/maneframe-<version>-win64.zip` (private Python, frontend, backend, llama.cpp b10679 Vulkan). `Start Maneframe.bat` runs `packaging/launcher.py`: free ports (8080 and 8000 preferred), data in `%LOCALAPPDATA%\Maneframe` (`MANEFRAME_DATA_DIR` overrides, launcher only), both servers stopped when the window closes. The model is placed by hand until the first-run chooser (DECISIONS D10 to D12). No API changes; `start.ps1` unchanged.
 - Export size options: `aspect=9:16` frames each clip automatically: a crop window that follows the motion, or, for wide action, the whole frame over a blurred copy; captions avoid the performers (no new params; DECISIONS D9); 1080x1920 (source height if smaller); `start` and `end` trim the clip (quips that start inside the range and finish by `end`, shifted). Optional query params on `POST /api/jobs/{id}/export` and `GET .../export.mp4`, defaults unchanged; 400 for bad values. The web app has a size choice and Start/End fields with Set start / Set end buttons next to "Download video".
 
 - Optional offline speech: `TTS_ENGINE=kokoro` (Kokoro via `kokoro-onnx`, CPU, wav, voice or blend in `KOKORO_VOICE`, default af_nicole, `KOKORO_GAIN_DB`; `scripts/voice_samples.py` for auditioning; model and voice files go in the git-ignored `models/kokoro/`; setup in the README).

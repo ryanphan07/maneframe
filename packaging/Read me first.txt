@@ -1,0 +1,13 @@
+Maneframe: turns lion dance clips into funny, spoken commentary.
+
+1. Double-click "Start Maneframe.bat" (keep this folder where it is while you use the app).
+   If Windows says "Windows protected your PC", click "More info", then "Run anyway".
+2. Your browser opens the app. Leave the black window open; close it to stop Maneframe.
+
+Your files (models, uploaded clips, labels, logs) are kept in:
+  %LOCALAPPDATA%\Maneframe        (paste that into the Explorer address bar)
+To remove everything, delete that folder and this one.
+
+Until the model downloader exists, the language model must be placed by hand in
+  %LOCALAPPDATA%\Maneframe\models
+If it is missing, Maneframe tells you the exact file names when you start it.

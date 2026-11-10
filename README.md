@@ -39,6 +39,21 @@ Key design points:
 - A running llama-server with a multimodal Qwen model and its mmproj file.
 - Internet access for edge-tts (an unofficial Microsoft endpoint; needs `edge-tts>=7.3.1`), or an offline voice (Piper or Kokoro, below).
 
+## Install on Windows (zip)
+
+For team members: no Python, Node, ffmpeg or git needed. Windows 10 or 11, 64-bit, about 16 GB of memory for the 35B model.
+
+1. Unzip `maneframe-<version>-win64.zip` anywhere (not inside a zip viewer; use "Extract All").
+2. Put the language model by hand (the first-run chooser and downloader are planned, DECISIONS D11): create `%LOCALAPPDATA%\Maneframe\models` (paste that into the Explorer address bar) and copy `Qwen3.6-35B-A3B-UD-Q3_K_XL.gguf` and `mmproj-Qwen3.6-35B-F16.gguf` into it. If they are missing, Start Maneframe.bat prints the exact folder and file names and stops.
+3. Double-click `Start Maneframe.bat`. The first time, Windows SmartScreen says "Windows protected your PC" (the package is not code-signed): click "More info", then "Run anyway".
+4. The browser opens. Keep the black window open; close it (or press Ctrl+C) to stop Maneframe. Ports start at 8080 (language model) and 8000 (app) and move up when taken.
+
+Data (models, uploads, labels, logs) lives in `%LOCALAPPDATA%\Maneframe`, or in the folder named by the `MANEFRAME_DATA_DIR` environment variable, so a newer zip reuses the model. Deleting the unzipped folder does not remove it; to uninstall, delete both folders. Speech is edge-tts, so clips need internet for audio.
+
+### Building the zip
+
+Developers, from the repo root with the backend venv, Node and internet: `.\scripts\package.ps1` writes `build\maneframe-<git describe>-win64.zip` (git-ignored). It builds `frontend\dist`, unpacks the python.org embeddable Python 3.12 and installs `backend\requirements.txt` into it from wheels (no Piper or Kokoro), adds the llama.cpp `b10679` Vulkan `llama-server` with its license, copies `backend\app`, and adds `packaging\launcher.py` and `Start Maneframe.bat`. The launcher runs on the package's own Python and passes settings to the backend as environment variables (`UPLOAD_DIR`, `LABELS_DIR`, `LLM_BASE_URL`, `PUBLIC_BASE_URL`).
+
 ## Quickstart (PowerShell, from the repo root)
 
 One command, after the one-time setup:

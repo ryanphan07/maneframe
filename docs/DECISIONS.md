@@ -80,3 +80,24 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: one static crop box per video (the first 9:16 version), or a user-chosen framing option in the export controls.
 - Why: the static box cut out performers who spread apart, and teams want a usable post in one click.
 - Tradeoff: the automatic choice can be wrong for a clip and there is no manual override yet; tracking adds export time.
+
+
+## 2026-11-09
+
+### D10. Distribution as a portable Windows zip
+- Decision: Maneframe ships as a zip with a private Python and its packages, the prebuilt frontend, the llama.cpp Vulkan llama-server and a Start Maneframe.bat. Unzip and double-click; no Python, Node, git or ffmpeg needed.
+- Alternative considered: a setup script run on a git clone; an Inno Setup installer with a PyInstaller-frozen backend.
+- Why: lion dance team members are not developers, and a zip has the fewest moving parts that can fail on someone else's machine.
+- Tradeoff: Windows SmartScreen warns on first run (no code signing), the zip is large, Windows only, and updating means downloading a new zip.
+
+### D11. Model chosen at first run
+- Decision: on first run the launcher detects RAM and GPU memory, recommends Qwen3.6-35B-A3B or Qwen3.5-9B, lets the user override, and downloads the chosen model from Hugging Face into the data folder with a checksum check. Models are never bundled in the zip.
+- Alternative considered: always the 35B; always the 9B; bundling a model in the zip.
+- Why: team laptops vary; the 35B needs about 16 GB of memory, the 9B runs on less, and keeping models out of the zip keeps it small and avoids redistributing model files.
+- Tradeoff: one more first-run step and a 7 to 16 GB download; the recommendation can be wrong; the 9B has not been tuned with the current prompt.
+
+### D12. App data in %LOCALAPPDATA%\Maneframe
+- Decision: models, uploads, labels and logs live in %LOCALAPPDATA%\Maneframe (overridable with MANEFRAME_DATA_DIR); the unzipped app folder holds only the program.
+- Alternative considered: everything inside the unzipped folder.
+- Why: the model survives unzipping a newer version, and the app folder can sit anywhere, including read-only locations.
+- Tradeoff: deleting the app folder leaves the data behind, so the README must say where it is and how to remove it.
