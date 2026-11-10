@@ -101,3 +101,9 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: everything inside the unzipped folder.
 - Why: the model survives unzipping a newer version, and the app folder can sit anywhere, including read-only locations.
 - Tradeoff: deleting the app folder leaves the data behind, so the README must say where it is and how to remove it.
+
+### D13. Model recommendation uses RAM only
+- Decision: the first-run chooser recommends Qwen3.6-35B-A3B when Windows reports at least 15 GB of total RAM, else Qwen3.5-9B. GPU memory is shown on the chooser screen but not used.
+- Alternative considered: also recommending the 35B at 16 GB of GPU memory, as specified for s56.
+- Why: llama.cpp reports an integrated GPU's shared memory, not dedicated memory (23.8 GB on the development PC with 15.6 GB of RAM), so a GPU rule would recommend a 16.5 GB download to laptops that cannot run it.
+- Tradeoff: a PC with a large discrete GPU but less than 15 GB of RAM is offered the 9B; the user can still type 35.
