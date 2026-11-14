@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-## v0.3.1
+- Launcher: when the model that failed to load is already the smallest in `models.json`, the out-of-memory message no longer tells the user to choose 9; it says: "This PC could not load <model>, the smallest model: not enough graphics memory. Close other programs and start Maneframe again." Other models keep the old text. Internal: `recommend()` lost its unused `gpu_bytes` parameter. No API changes.
+
+## v0.3.1 (tagged 2026-11-13)
 
 - Portable zip: loads the 35B on PCs with an integrated plus a discrete GPU. The launcher no longer passes `-ngl 99` to llama-server, whose automatic fit now splits the model between GPUs and RAM (D20); with `-ngl 99` the 35B ran out of Vulkan memory on a laptop with an Intel iGPU and an 8 GB RTX 4060 (MC-9). Same 41/41 offload and job time within 1.4% on the development PC.
 - When llama-server exits while loading, the launcher reads the end of llama-server.log: for an out-of-memory error it says this PC could not load the model and to choose the smaller one with Change model.bat; otherwise it prints the last 5 log lines and the log path (it used to print only the exit code).

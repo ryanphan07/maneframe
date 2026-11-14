@@ -2,6 +2,22 @@
 
 Design decisions are in `docs/DECISIONS.md`; what is implemented is in `docs/STATE.md`.
 
+## Maintenance mode (2026-11-13)
+v0.3.1 is released (GitHub Release, 2026-11-13); the project moves to maintenance, no new features planned.
+v0.3.1 delivers: a portable Windows zip that downloads the chosen Qwen model at first run and loads the 35B on PCs with an integrated plus a discrete GPU (MC-9, MC-10 passed).
+It also delivers mp4 export (original or 9:16 with trim and captions), and the local backend and React player with time-synced commentary and TTS.
+
+Parked (pick up from here):
+- Humor and commentary quality: pool_s40 verdict about 2/5 for every group (`docs/research/grounding.md`, Phase 1 below).
+- A cheaper facts call (`docs/research/grounding.md`, arm b).
+- Streaming upload, option 3 (`docs/research/large_uploads.md`; needs owner sign-off, changes the upload route).
+- Code signing (DECISIONS D15).
+- A real 4K H.264 clip through the conversion path (Phase 2, "H.264 size and HDR").
+- HEVC fallback player in a real browser (MC-4).
+- The 5 s polling fallback in a browser (the WebSocket-drop spec passes; a manual browser look is not done).
+- Launcher stdout buffering when redirected (`packaging/launcher.py`).
+- Open manual checks: MC-2, MC-3, MC-4, MC-6 (`docs/MANUAL_CHECKS.md`).
+
 ## Done
 - Upload validation, job store, WebSocket progress, background pipeline with cleanup of job files.
 - Motion-based crop and windowed frame sampling with OpenCV.
@@ -37,11 +53,13 @@ The goal is a better product for real users: lion dance teams turning performanc
 - Large uploads (`docs/research/large_uploads.md`): a 5 min iPhone 4K clip is 6 GB. Option 1 done and tested: a Content-Length above MAX_UPLOAD_MB plus 1 MiB is a 413 before the body is read, and the client checks the file against `max_upload_mb` from `/api/styles` first. Option 3 (streaming upload with a higher cap) is open and needs owner sign-off because it changes the upload route.
 - H.264 size and HDR (done, session 43): an H.264 upload whose long side is above `TRANSCODE_MAX_SIDE` or that is HLG/PQ HDR goes through the same conversion; frame rate alone is no trigger. Tested on tiny generated clips (over max side, HLG, 1080p30 untouched); not run on a real 4K H.264 clip.
 
-## Phase 3: distribution
+## Phase 3: distribution (done: v0.3.0 and v0.3.1)
 Local only, no hosted service (D6). Packaging is a portable Windows zip (D10), model chosen at first run (D11), data in %LOCALAPPDATA%\Maneframe (D12).
 - Done (s55): `scripts/package.ps1` builds the zip; `packaging/` holds the launcher and Start Maneframe.bat. Models were placed by hand.
 - Done (s56): first-run chooser and downloader (`packaging/models.json`, Hugging Face, resume, sha256), Change model.bat.
-- Open: code signing, auto-update, voice options beyond edge-tts (D7).
+- Done (v0.3.0, 2026-11-10): the zip released, ffmpeg downloaded at first run (D18), MC-8 and MC-9 run on two PCs.
+- Done (v0.3.1, 2026-11-13): the launcher no longer passes `-ngl 99` (D20); load failures explained; every GPU listed; MC-10 passed.
+- Parked: code signing (D15), auto-update, voice options beyond edge-tts (D7).
 
 ## Out of scope
 Auth, persistence or a database, a multi-user queue, S3 or presigned uploads, Docker, deployment, an MCP server, an analytics dashboard.
