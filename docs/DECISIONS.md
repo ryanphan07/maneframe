@@ -146,3 +146,11 @@ A 10+ minute clip is one job of about 60 windows. Today one failed window fails 
 - Alternative considered: replacing it with a permissively licensed duration reader.
 - Why: mutagen is pure Python, so the zip already carries its source; Maneframe's own code is MIT (GPL-compatible) and public. No code change or re-test needed.
 - Tradeoff: the zip as a whole is distributed on GPL-compatible terms; a closed-source build would have to replace mutagen.
+
+## 2026-11-13
+
+### D20. llama-server fits the model to the GPUs itself
+- Decision: the launcher no longer passes `-ngl 99`; llama-server's automatic fit decides how many layers go to each GPU and keeps the rest in RAM. If llama-server still exits while loading, the launcher reads the end of llama-server.log and, for an out-of-memory error, tells the user to choose the smaller model with Change model.bat.
+- Alternative considered: keeping `-ngl 99` and restarting without it only after a failed load.
+- Why: in MC-9 (2026-11-13) the 35B failed to load with `-ngl 99` on a laptop with 32 GB of RAM, an Intel iGPU and an 8 GB RTX 4060 (Vulkan out of device memory); the same files loaded with the automatic fit.
+- Tradeoff: llama.cpp chooses the split, so speed can differ from `-ngl 99`; measured on the development PC in s59.

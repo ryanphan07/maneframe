@@ -248,3 +248,16 @@ Candidate: official llama-b12131 Vulkan x64 (C:\AI\llama-b12131-bin-win-vulkan-x
 | 4 frames, run 1 / 2 | 34.3 / 30.5 | 5131 (5574) |
 
 Ratio 0.81 and 0.76. The 0.8x bar was missed by run 1, and the notable-line share fell from 21% to 8% (`docs/research/grounding.md`, session 53), so the default stays 6. Prefill remains about 65 tokens/s.
+
+## 2026-11-13 (session 59: llama-server without `-ngl 99`, D20)
+Portable zip built from the s59 branch (llama-server b10679 Vulkan, `-c 8192 -np 1 --jinja`, the launcher's own command line), `MANEFRAME_DATA_DIR` with hardlinked models, shorter_test.mp4, one job each, default settings (hype, kokoro). Dev PC: AMD Radeon 860M iGPU (15.6 GB RAM, no discrete GPU). "Main" = the launcher from main with `-ngl 99` in the same zip.
+
+| Model | Setting | Total s | analyze s | LLM call s (prompt / completion tokens) |
+|---|---|---|---|---|
+| 35B UD-Q3_K_XL | `-ngl 99` (main launcher) | 90.9 | 84.2 | 84.2 (5967 / 160) |
+| 35B UD-Q3_K_XL | no `-ngl` (new launcher) | 92.2 | 87.3 | 87.3 (5967 / 118) |
+| 9B Q4_K_M | no `-ngl` (new launcher) | 102.6 | 98.1 | 98.1 (5967 / 200) |
+
+- `load_tensors: offloaded 41/41 layers to GPU` for the 35B with `-ngl 99` and without it (`-lv 5` runs of the zip's llama-server with the launcher's arguments; the default log level does not print this line). The automatic fit projected 15839 MiB of 23111 MiB free and changed nothing, so the placement is the same on this PC. Load to listening: 36 s with `-ngl 99`, 33 s without.
+- Design choice 1 rule: 92.2 s is 1.4% longer than 90.9 s (limit 10%), so the fallback was not built; D20 keeps the plain no-`-ngl` command. One job per setting, so differences of a few seconds are within run-to-run noise (the completion token counts differ).
+- The 9B being slower than the 35B here is the iGPU (completion length and prefill), as in earlier sessions.

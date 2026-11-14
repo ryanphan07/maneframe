@@ -40,12 +40,61 @@ def test_recommend(ram, gpu, want):
     assert launcher.recommend(None if ram is None else int(ram), None if gpu is None else int(gpu)) == want
 
 
-def test_parse_devices_picks_the_largest():
-    text = ("ggml_vulkan: Found 1 Vulkan devices:\nAvailable devices:\n"
-            "  Vulkan0: AMD Radeon(TM) 860M Graphics (24394 MiB, 23175 MiB free)\n"
-            "  Vulkan1: Other GPU (4096 MiB, 4000 MiB free)\n")
-    assert launcher.parse_devices(text) == ("AMD Radeon(TM) 860M Graphics", 24394 * 1024 * 1024)
-    assert launcher.parse_devices("no devices here") == (None, None)
+MC9_DEVICES = ("Available devices:\n"
+               "  Vulkan0: Intel(R) RaptorLake-S Mobile Graphics Controller (16237 MiB, 15469 MiB free)\n"
+               "  Vulkan1: NVIDIA GeForce RTX 4060 Laptop GPU (7956 MiB, 5955 MiB free)\n")
+
+
+def test_parse_devices_lists_every_device():
+    assert launcher.parse_devices(MC9_DEVICES) == [
+        ("Intel(R) RaptorLake-S Mobile Graphics Controller", 16237 * 1024 * 1024),
+        ("NVIDIA GeForce RTX 4060 Laptop GPU", 7956 * 1024 * 1024)]
+    one = "  Vulkan0: AMD Radeon(TM) 860M Graphics (24394 MiB, 23175 MiB free)\n"
+    assert launcher.parse_devices(one) == [("AMD Radeon(TM) 860M Graphics", 24394 * 1024 * 1024)]
+    assert launcher.parse_devices("no devices here") == []
+
+
+def test_chooser_prints_one_line_per_gpu(tmp_path, monkeypatch):
+    models = launcher.load_manifest(str(ROOT / "packaging" / "models.json"))
+    monkeypatch.setattr(launcher, "free_disk_bytes", lambda p: 500 * GB)
+    lines = []
+    launcher.choose_model(models, 32 * GB, launcher.parse_devices(MC9_DEVICES), str(tmp_path), lambda _: "", lines.append)
+    gpu_lines = [l for l in lines if l.strip().startswith("GPU:")]
+    assert len(gpu_lines) == 2
+    assert "Intel(R) RaptorLake-S Mobile Graphics Controller, 15.9 GB (as reported by llama-server)" in gpu_lines[0]
+    assert "NVIDIA GeForce RTX 4060 Laptop GPU, 7.8 GB" in gpu_lines[1]
+
+
+def test_llama_command_has_no_ngl():
+    cmd = launcher.llama_command("m.gguf", "p.gguf", 8090)
+    assert "-ngl" not in cmd and "--n-gpu-layers" not in cmd
+    assert cmd[cmd.index("-m") + 1] == "m.gguf" and cmd[cmd.index("--mmproj") + 1] == "p.gguf"
+    assert cmd[cmd.index("--port") + 1] == "8090" and "--jinja" in cmd
+
+
+MC9_LOG = """load_tensors: loading model tensors, this can take a while... (mmap = true)
+common_fit_params: failed to fit params to free device memory: n_gpu_layers already set by user to 99, abort
+ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory
+failed to allocate Vulkan1 buffer of size 1019751936
+"""
+
+
+def test_load_failure_out_of_memory_points_to_change_model():
+    msg = launcher.load_failure_message("x\n" * 100 + MC9_LOG, "Qwen3.6-35B-A3B", "L.log")
+    assert msg == ("This PC could not load Qwen3.6-35B-A3B: not enough graphics memory. Double-click Change model.bat, "
+                   "choose 9 (the smaller model), then start Maneframe again.")
+
+
+def test_load_failure_other_error_prints_last_five_lines_and_path():
+    log = "\n".join(f"line {i}" for i in range(50)) + "\nerror: model file is corrupt\n"
+    msg = launcher.load_failure_message(log, "M", "C:\\logs\\llama-server.log")
+    assert "model file is corrupt" in msg and "line 46" in msg and "line 45" not in msg
+    assert "C:\\logs\\llama-server.log" in msg and "graphics memory" not in msg
+
+
+def test_load_failure_oom_older_than_40_lines_is_ignored():
+    log = MC9_LOG + "\n".join(f"ok {i}" for i in range(45))
+    assert "graphics memory" not in launcher.load_failure_message(log, "M", "L")
 
 
 # ---- manifest ----
@@ -117,13 +166,13 @@ def test_chooser_enter_takes_recommendation_and_override(tmp_path, monkeypatch):
     models = launcher.load_manifest(str(ROOT / "packaging" / "models.json"))
     monkeypatch.setattr(launcher, "free_disk_bytes", lambda p: 500 * GB)
     lines = []
-    pick = launcher.choose_model(models, int(15.6 * GB), "GPU X", int(23.8 * GB), str(tmp_path), lambda _: "", lines.append)
+    pick = launcher.choose_model(models, int(15.6 * GB), [("GPU X", int(23.8 * GB))], str(tmp_path), lambda _: "", lines.append)
     assert pick["key"] == "35"
     text = "\n".join(lines)
     assert "15.6 GB" in text and "GPU X" in text and "500.0 GB free" in text and "Recommended for this PC: 35" in text
     assert "download 16.5 GB: model 15.7 GB + vision 0.8 GB" in text
     answers = iter(["x", "9"])
-    assert launcher.choose_model(models, int(15.6 * GB), "GPU X", None, str(tmp_path), lambda _: next(answers), quiet)["key"] == "9"
+    assert launcher.choose_model(models, int(15.6 * GB), [], str(tmp_path), lambda _: next(answers), quiet)["key"] == "9"
 
 
 def test_chooser_refuses_a_model_that_does_not_fit_then_accepts_the_other(tmp_path, monkeypatch):
@@ -131,7 +180,7 @@ def test_chooser_refuses_a_model_that_does_not_fit_then_accepts_the_other(tmp_pa
     monkeypatch.setattr(launcher, "free_disk_bytes", lambda p: 10 * GB)  # fits the 9B (6.6 GB + 2), not the 35B
     lines = []
     answers = iter(["35", "9"])
-    pick = launcher.choose_model(models, 32 * GB, None, None, str(tmp_path), lambda _: next(answers), lines.append)
+    pick = launcher.choose_model(models, 32 * GB, [], str(tmp_path), lambda _: next(answers), lines.append)
     assert pick["key"] == "9"
     assert any("Not enough free disk space" in line for line in lines)
 
@@ -144,7 +193,7 @@ def test_chooser_without_keyboard_stops(tmp_path, monkeypatch):
         raise EOFError
 
     with pytest.raises(launcher.Stop):
-        launcher.choose_model(models, 32 * GB, None, None, str(tmp_path), eof, quiet)
+        launcher.choose_model(models, 32 * GB, [], str(tmp_path), eof, quiet)
 
 
 # ---- download against a local server with Range support ----

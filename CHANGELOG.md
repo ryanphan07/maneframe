@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.3.1
+
+- Portable zip: loads the 35B on PCs with an integrated plus a discrete GPU. The launcher no longer passes `-ngl 99` to llama-server, whose automatic fit now splits the model between GPUs and RAM (D20); with `-ngl 99` the 35B ran out of Vulkan memory on a laptop with an Intel iGPU and an 8 GB RTX 4060 (MC-9). Same 41/41 offload and job time within 1.4% on the development PC.
+- When llama-server exits while loading, the launcher reads the end of llama-server.log: for an out-of-memory error it says this PC could not load the model and to choose the smaller one with Change model.bat; otherwise it prints the last 5 log lines and the log path (it used to print only the exit code).
+- The first-run chooser lists every GPU llama-server reports, one line each. The recommendation rule is unchanged (RAM only, D13). `start.ps1` unchanged. No API changes.
+
 ## v0.3.0 (tagged 2026-11-10)
 
 Changes after the v0.2.0 tag. Test counts: see docs/CONVENTIONS.md Commands.
