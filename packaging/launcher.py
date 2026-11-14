@@ -194,17 +194,13 @@ def total_ram_bytes():
 
 
 def parse_devices(text):
-    """The largest device in `llama-server --list-devices` output: (name, bytes), or (None, None).
+    """Every device in `llama-server --list-devices` output, in order: [(name, bytes), ...].
 
     Lines look like "  Vulkan0: AMD Radeon(TM) 860M Graphics (24394 MiB, 23175 MiB free)". An integrated GPU reports
     the shared system memory it may use, not a dedicated amount; llama.cpp does not tell the two apart.
     """
-    best = (None, None)
-    for m in re.finditer(r"^\s*\S+?\d+:\s*(.+?)\s*\((\d+)\s*MiB", text, re.M):
-        size = int(m.group(2)) * 1024 * 1024
-        if best[1] is None or size > best[1]:
-            best = (m.group(1), size)
-    return best
+    return [(m.group(1), int(m.group(2)) * 1024 * 1024)
+            for m in re.finditer(r"^\s*\S+?\d+:\s*(.+?)\s*\((\d+)\s*MiB", text, re.M)]
 
 
 def gpu_info(llama=LLAMA):
@@ -212,10 +208,38 @@ def gpu_info(llama=LLAMA):
         out = subprocess.run([llama, "--list-devices"], capture_output=True, timeout=30, cwd=os.path.dirname(llama))
         return parse_devices((out.stdout + out.stderr).decode("utf-8", "replace"))
     except Exception:
-        return None, None
+        return []
 
 
-def recommend(ram_bytes, gpu_bytes):
+OOM_MARKERS = ("erroroutofdevicememory", "failed to fit params", "unable to allocate", "out of memory")
+
+
+def load_failure_message(log_text, model_name, log_path):
+    """What to tell the user when llama-server exits while loading, from the last 40 lines of its log (D20)."""
+    tail = [line for line in log_text.splitlines() if line.strip()][-40:]
+    if any(mark in line.lower() for line in tail for mark in OOM_MARKERS):
+        return (f"This PC could not load {model_name}: not enough graphics memory. Double-click Change model.bat, "
+                "choose 9 (the smaller model), then start Maneframe again.")
+    return "llama-server stopped while loading the model. Last lines of the log:\n" + "\n".join(tail[-5:]) + f"\nLog: {log_path}"
+
+
+def read_log_tail(path, size=16384):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(f.tell() - size, 0))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def llama_command(model, mmproj, port):
+    """The llama-server command line. No -ngl: llama-server fits layers to the GPUs and RAM itself (D20)."""
+    return [LLAMA, "-m", model, "--mmproj", mmproj, "-c", LLM_CTX, "-np", "1",
+            "--host", "127.0.0.1", "--port", str(port), "--jinja"]
+
+
+def recommend(ram_bytes, gpu_bytes=None):
     """The 35B when total RAM is at least 15 GB, else the 9B. gpu_bytes is shown on screen only: llama.cpp reports an
     integrated GPU's shared memory, not dedicated memory, so it says nothing about what the PC can run."""
     if (ram_bytes or 0) >= RECOMMEND_35B_RAM:
@@ -256,13 +280,14 @@ def disk_problem(entry, models_dir, free, extra=0):
             "Free up space or choose the other model.")
 
 
-def choose_model(models, ram, gpu_name, gpu_bytes, models_dir, input_fn=input, out=print, extra=0):
+def choose_model(models, ram, gpus, models_dir, input_fn=input, out=print, extra=0):
     free = free_disk_bytes(models_dir)
-    rec = recommend(ram, gpu_bytes)
+    rec = recommend(ram)
     keys = {m["key"]: m for m in models}
     out("\nManeframe needs a language model. This PC:")
     out(f"  RAM:   {ram / GB:.1f} GB" if ram else "  RAM:   unknown")
-    out(f"  GPU:   {gpu_name}, {gpu_bytes / GB:.1f} GB (as reported by llama-server)" if gpu_bytes else "  GPU:   not detected")
+    for name, size in gpus or [(None, None)]:
+        out(f"  GPU:   {name}, {size / GB:.1f} GB (as reported by llama-server)" if size else "  GPU:   not detected")
     out(f"  Disk:  {free / GB:.1f} GB free in {models_dir}")
     out("")
     for m in models:
@@ -530,8 +555,7 @@ def select_model(data, change=False, input_fn=input, out=print, extra=0):
     entry = next((m for m in models if m["id"] == cfg.get("model")), None)
     if entry is None or not model_ready(entry, data):
         os.makedirs(os.path.join(data, "models"), exist_ok=True)
-        gpu_name, gpu_bytes = gpu_info()
-        entry = choose_model(models, total_ram_bytes(), gpu_name, gpu_bytes, os.path.join(data, "models"), input_fn, out, extra)
+        entry = choose_model(models, total_ram_bytes(), gpu_info(), os.path.join(data, "models"), input_fn, out, extra)
     return ensure_model(entry, data, out)
 
 
@@ -623,8 +647,7 @@ def main():
     try:
         llama_log = open(os.path.join(logs, "llama-server.log"), "wb")
         llama = subprocess.Popen(
-            [LLAMA, "-m", model, "--mmproj", mmproj, "-c", LLM_CTX, "-np", "1", "-ngl", "99",
-             "--host", "127.0.0.1", "--port", str(llama_port), "--jinja"],
+            llama_command(model, mmproj, llama_port),
             cwd=os.path.dirname(LLAMA), stdout=llama_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
         started.append(llama)
         job.add(llama)
@@ -635,7 +658,10 @@ def main():
             if code == 200 and '"ok"' in body.replace(" ", ""):
                 break
             if llama.poll() is not None:
-                raise Stop(f"llama-server stopped (exit {llama.returncode}). See {os.path.join(logs, 'llama-server.log')}")
+                log_path = os.path.join(logs, "llama-server.log")
+                llama_log.flush()
+                name = next((m["name"] for m in load_manifest() if m["id"] == read_config(data).get("model")), os.path.basename(model))
+                raise Stop(load_failure_message(read_log_tail(log_path), name, log_path))
             if time.time() > deadline:
                 raise Stop(f"The model did not load in {LLAMA_READY_TIMEOUT // 60} minutes. See {os.path.join(logs, 'llama-server.log')}")
             time.sleep(2)

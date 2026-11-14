@@ -61,6 +61,7 @@ For team members: no Python, Node, ffmpeg or git needed (the video tool is downl
    - `35`: Qwen3.6-35B-A3B, download 16.5 GB (model 15.7 GB + vision 0.8 GB). Better commentary; recommended with 15 GB of RAM or more.
    - `9`: Qwen3.5-9B, download 6.1 GB (model 5.3 GB + vision 0.9 GB). For PCs with less memory.
    The model is downloaded once from Hugging Face and checked against a checksum: a few minutes on a fast connection, much longer on slow Wi-Fi (one 35B download took 33 minutes). If it is interrupted, or you close the window, start Maneframe again and it continues where it stopped. A connection that crawls is dropped and resumed automatically.
+   If the black window says "This PC could not load ... not enough graphics memory", double-click `Change model.bat`, choose `9`, then start Maneframe again.
 6. The browser opens. Keep the black window open while you use Maneframe; close it, or press Ctrl+C, to stop. Ports start at 8080 (language model) and 8000 (app) and move up when taken.
 
 To switch models later, double-click `Change model.bat` (downloaded models are kept, so switching back needs no download). Commentary voices use edge-tts, so generating the audio needs internet even after the model and the video tool are downloaded.

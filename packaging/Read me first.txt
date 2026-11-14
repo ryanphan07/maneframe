@@ -17,6 +17,7 @@ recommended one):
 A few minutes on a fast connection, much longer on slow Wi-Fi. If the download stops, start Maneframe
 again and it continues. Right after the model, Maneframe also downloads the video tool (ffmpeg,
 30 MB, once; it is not in the zip because that build is GPL-licensed). To switch models later, double-click "Change model.bat".
+If the black window says "This PC could not load ... not enough graphics memory", double-click "Change model.bat", choose 9, then start Maneframe again.
 Voices (edge-tts) still need an internet connection whenever you make a clip.
 
 Your files (models, uploaded clips, labels, logs) are kept in:
