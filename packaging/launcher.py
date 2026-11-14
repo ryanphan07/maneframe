@@ -214,10 +214,14 @@ def gpu_info(llama=LLAMA):
 OOM_MARKERS = ("erroroutofdevicememory", "failed to fit params", "unable to allocate", "out of memory")
 
 
-def load_failure_message(log_text, model_name, log_path):
-    """What to tell the user when llama-server exits while loading, from the last 40 lines of its log (D20)."""
+def load_failure_message(log_text, model_name, log_path, smallest=False):
+    """What to tell the user when llama-server exits while loading, from the last 40 lines of its log (D20).
+    smallest: the model that failed is already the smallest in models.json, so there is nothing smaller to suggest."""
     tail = [line for line in log_text.splitlines() if line.strip()][-40:]
     if any(mark in line.lower() for line in tail for mark in OOM_MARKERS):
+        if smallest:
+            return (f"This PC could not load {model_name}, the smallest model: not enough graphics memory. "
+                    "Close other programs and start Maneframe again.")
         return (f"This PC could not load {model_name}: not enough graphics memory. Double-click Change model.bat, "
                 "choose 9 (the smaller model), then start Maneframe again.")
     return "llama-server stopped while loading the model. Last lines of the log:\n" + "\n".join(tail[-5:]) + f"\nLog: {log_path}"
@@ -239,8 +243,8 @@ def llama_command(model, mmproj, port):
             "--host", "127.0.0.1", "--port", str(port), "--jinja"]
 
 
-def recommend(ram_bytes, gpu_bytes=None):
-    """The 35B when total RAM is at least 15 GB, else the 9B. gpu_bytes is shown on screen only: llama.cpp reports an
+def recommend(ram_bytes):
+    """The 35B when total RAM is at least 15 GB, else the 9B. GPU memory is not an input: llama.cpp reports an
     integrated GPU's shared memory, not dedicated memory, so it says nothing about what the PC can run."""
     if (ram_bytes or 0) >= RECOMMEND_35B_RAM:
         return "35"
@@ -660,8 +664,11 @@ def main():
             if llama.poll() is not None:
                 log_path = os.path.join(logs, "llama-server.log")
                 llama_log.flush()
-                name = next((m["name"] for m in load_manifest() if m["id"] == read_config(data).get("model")), os.path.basename(model))
-                raise Stop(load_failure_message(read_log_tail(log_path), name, log_path))
+                manifest = load_manifest()
+                cur = next((m for m in manifest if m["id"] == read_config(data).get("model")), None)
+                name = cur["name"] if cur else os.path.basename(model)
+                smallest = bool(cur) and download_size(cur) == min(download_size(m) for m in manifest)
+                raise Stop(load_failure_message(read_log_tail(log_path), name, log_path, smallest))
             if time.time() > deadline:
                 raise Stop(f"The model did not load in {LLAMA_READY_TIMEOUT // 60} minutes. See {os.path.join(logs, 'llama-server.log')}")
             time.sleep(2)

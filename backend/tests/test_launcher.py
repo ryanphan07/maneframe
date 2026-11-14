@@ -37,7 +37,7 @@ def quiet(*args, **kwargs):
     (None, None, "9"),              # nothing detected: the safe choice
 ])
 def test_recommend(ram, gpu, want):
-    assert launcher.recommend(None if ram is None else int(ram), None if gpu is None else int(gpu)) == want
+    assert launcher.recommend(None if ram is None else int(ram)) == want
 
 
 MC9_DEVICES = ("Available devices:\n"
@@ -83,6 +83,13 @@ def test_load_failure_out_of_memory_points_to_change_model():
     msg = launcher.load_failure_message("x\n" * 100 + MC9_LOG, "Qwen3.6-35B-A3B", "L.log")
     assert msg == ("This PC could not load Qwen3.6-35B-A3B: not enough graphics memory. Double-click Change model.bat, "
                    "choose 9 (the smaller model), then start Maneframe again.")
+
+
+def test_load_failure_out_of_memory_on_smallest_model_does_not_suggest_9():
+    msg = launcher.load_failure_message(MC9_LOG, "Qwen3.5-9B", "L.log", smallest=True)
+    assert msg == ("This PC could not load Qwen3.5-9B, the smallest model: not enough graphics memory. "
+                   "Close other programs and start Maneframe again.")
+    assert "choose 9" not in msg
 
 
 def test_load_failure_other_error_prints_last_five_lines_and_path():

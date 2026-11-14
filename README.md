@@ -2,7 +2,7 @@
 
 Upload a lion dance performance clip and get humorous, time-synced play-by-play commentary, read aloud while the video plays. A local vision LLM watches the footage, edge-tts (or, offline, Piper or Kokoro) speaks the lines, and the server schedules them so they never overlap.
 
-Status: v0.3.0 is the current release, downloadable from the Releases page (git tags v0.1.0 to v0.3.0); changes after it are under Unreleased in [`CHANGELOG.md`](CHANGELOG.md). A working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
+Status: v0.3.1 is the current release, downloadable from the Releases page (git tags v0.1.0 to v0.3.0; v0.3.1 is a GitHub Release, tagged 2026-11-13); changes after it are under Unreleased in [`CHANGELOG.md`](CHANGELOG.md). A working local prototype that is being developed into a tool for lion dance teams who turn performance clips into shareable posts (roadmap: `docs/TASKS.md`). It runs end to end with no fake output: if the model or TTS fails, you see an error or a "no audio" notice, never placeholder content.
 
 ![demo](docs/demo.gif)
 
@@ -194,7 +194,9 @@ The shorter_test row is from 2026-10-28; the hoco_40s row was re-measured on 202
 - Backend tests (counts: docs/CONVENTIONS.md Commands; LLM and edge-tts faked, Piper and Kokoro faked plus one real synthesis test each that is skipped without the package; real tiny videos and a real mp3), frontend tests (Vitest), frontend lint and build.
 - One scripted end-to-end run on 3 real clips plus a repeat (table above) against a real llama-server and the real edge-tts service: all 4 accepted jobs finished, with no overlapping audio and no TTS failures in the timeline.
 - Browser playback (sync, seek, pause) checked by hand on 2026-10-28 with hoco_40s.mp4 and the final fix: no problems seen.
-- Untested: commentary quality (judged by ear and eye only), clips longer than 40 s, other machines.
+- Longer clips: a 327 s clip ran end to end on the 35B (23.3 min, `docs/BENCHMARKS.md`).
+- Other machines: the portable zip was run on a second Windows laptop (31.7 GB RAM, Intel iGPU plus NVIDIA RTX 4060 Laptop 8 GB): v0.3.0 (MC-9) ran the 9B end to end but could not load the 35B (fixed in v0.3.1); v0.3.1 (MC-10) loaded the 35B, completed the 40 s clip in about 3 minutes (hand-timed, one run) and exported a playable mp4.
+- Untested: commentary quality (judged by ear and eye only; the humor ratings are about 2 out of 5), clips over 10 minutes, a PC without the Visual C++ runtime, the HEVC fallback player in a real browser, a real 4K H.264 clip.
 
 ## Troubleshooting
 - Progress stops and the page says "Live updates lost": on Windows, selecting text in the backend console window (QuickEdit) pauses the server until you press Enter. Press Enter, or turn QuickEdit off in the console properties.
